@@ -307,6 +307,10 @@ async function initBridge(
   // session resume — it sees the full conversation history including all prior messages.
   // Processing each message separately would generate 3 independent responses, which
   // is not the intended UX for a conversational AI.
+  //
+  // All user messages have status='done' (set by the API route on insertion).
+  // They're visible in the chat UI and included in Claude's session history.
+  // No messages are lost or need a "superseded" status.
   const pollInterval = setInterval(async () => {
     try {
       if (localInstanceIds.size === 0) return;

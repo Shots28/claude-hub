@@ -356,7 +356,7 @@ export class InstanceManager extends EventEmitter {
               this.emit("text_delta", instanceId, delta.text);
 
               // Update assistant message periodically
-              if (fullText.length % 200 < delta.text.length) {
+              if (fullText.length % 500 < delta.text.length) {
                 await this.supabase
                   .from("chat_messages")
                   .update({ content: fullText })

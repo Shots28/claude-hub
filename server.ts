@@ -358,10 +358,11 @@ async function initBridge(
       console.log("[server] Server closed");
       process.exit(0);
     });
+    const SHUTDOWN_TIMEOUT = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || "30000", 10);
     setTimeout(() => {
       console.error("[server] Forced exit");
       process.exit(1);
-    }, 30_000).unref();
+    }, SHUTDOWN_TIMEOUT).unref();
   }
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));

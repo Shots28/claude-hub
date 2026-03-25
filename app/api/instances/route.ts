@@ -84,9 +84,16 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if (typeof repoPath !== "string" || !repoPath.startsWith("/")) {
+    const sanitizedName = name.replace(/[<>'"]/g, '').trim();
+    if (!sanitizedName) {
       return NextResponse.json(
-        { error: "repoPath must be an absolute path" },
+        { error: "name contains only invalid characters" },
+        { status: 400 },
+      );
+    }
+    if (typeof repoPath !== "string" || !repoPath.startsWith("/") || repoPath.includes("..")) {
+      return NextResponse.json(
+        { error: "repoPath must be an absolute path without '..' segments" },
         { status: 400 },
       );
     }
@@ -106,7 +113,7 @@ export async function POST(req: NextRequest) {
       .from("instances") as any)
       .insert({
         id,
-        name,
+        name: sanitizedName,
         repo_path: repoPath,
         permission_mode: permissionMode ?? "acceptEdits",
         allowed_tools: [],

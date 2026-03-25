@@ -12,8 +12,8 @@ interface PermissionBannerProps {
   onDeny: (id: string) => void;
 }
 
-// Default timeout: 2 minutes from request time
-const TIMEOUT_MS = 2 * 60 * 1000;
+// Default timeout: 5 minutes from request time (matches server-side timeout)
+const TIMEOUT_MS = 5 * 60 * 1000;
 
 function getToolInputSummary(
   toolName: string,

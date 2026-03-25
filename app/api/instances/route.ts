@@ -62,11 +62,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, repoPath, permissionMode, allowedTools } = body as {
+    const { name, repoPath, permissionMode } = body as {
       name?: string;
       repoPath?: string;
       permissionMode?: PermissionMode;
-      allowedTools?: string[];
     };
 
     if (!name || !repoPath) {
@@ -100,8 +99,8 @@ export async function POST(req: NextRequest) {
         id,
         name,
         repo_path: repoPath,
-        permission_mode: permissionMode ?? "auto",
-        allowed_tools: allowedTools ?? [],
+        permission_mode: permissionMode ?? "bypassPermissions",
+        allowed_tools: [],
         status: "stopped",
       })
       .select()

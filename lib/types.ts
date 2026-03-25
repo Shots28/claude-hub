@@ -6,7 +6,7 @@
 
 export type InstanceStatus = "idle" | "running" | "stopped" | "error" | "queued";
 
-export type PermissionMode = "auto" | "approve" | "deny";
+export type PermissionMode = "bypassPermissions" | "acceptEdits" | "default";
 
 export interface PendingPermission {
   id: string;

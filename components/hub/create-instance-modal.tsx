@@ -18,18 +18,6 @@ interface DiscoveredRepo {
   path: string;
 }
 
-const COMMON_TOOLS = [
-  "Read",
-  "Write",
-  "Edit",
-  "Bash",
-  "Glob",
-  "Grep",
-  "WebFetch",
-  "WebSearch",
-  "NotebookEdit",
-];
-
 export function CreateInstanceModal({
   open,
   onClose,
@@ -38,8 +26,7 @@ export function CreateInstanceModal({
   const [name, setName] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [permissionMode, setPermissionMode] =
-    useState<PermissionMode>("auto");
-  const [allowedTools, setAllowedTools] = useState<string[]>([]);
+    useState<PermissionMode>("bypassPermissions");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,7 +100,6 @@ export function CreateInstanceModal({
             name: name.trim(),
             repoPath: repoPath.trim(),
             permissionMode,
-            allowedTools,
           }),
         });
 
@@ -126,8 +112,7 @@ export function CreateInstanceModal({
         // Reset form
         setName("");
         setRepoPath("");
-        setPermissionMode("auto");
-        setAllowedTools([]);
+        setPermissionMode("bypassPermissions");
         setSearchQuery("");
         setShowManual(false);
         onCreated();
@@ -138,14 +123,8 @@ export function CreateInstanceModal({
         setLoading(false);
       }
     },
-    [name, repoPath, permissionMode, allowedTools, onCreated, onClose],
+    [name, repoPath, permissionMode, onCreated, onClose],
   );
-
-  const toggleTool = (tool: string) => {
-    setAllowedTools((prev) =>
-      prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool],
-    );
-  };
 
   if (!open) return null;
 
@@ -329,43 +308,48 @@ export function CreateInstanceModal({
             >
               Permission mode
             </label>
-            <select
-              id="instance-permission"
-              value={permissionMode}
-              onChange={(e) =>
-                setPermissionMode(e.target.value as PermissionMode)
-              }
-              className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50"
-            >
-              <option value="auto">Auto-approve all</option>
-              <option value="approve">Ask for approval</option>
-              <option value="deny">Auto-deny all</option>
-            </select>
-          </div>
-
-          {/* Allowed tools */}
-          <div>
-            <span className="block text-xs font-medium text-hub-text-muted mb-1.5">
-              Allowed tools
-            </span>
-            <div className="flex flex-wrap gap-2">
-              {COMMON_TOOLS.map((tool) => {
-                const isSelected = allowedTools.includes(tool);
-                return (
-                  <button
-                    key={tool}
-                    type="button"
-                    onClick={() => toggleTool(tool)}
-                    className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${
-                      isSelected
-                        ? "bg-hub-accent/20 border-hub-accent/50 text-hub-accent"
-                        : "bg-hub-surface-2 border-hub-border text-hub-text-muted hover:border-hub-text-muted/30"
-                    }`}
-                  >
-                    {tool}
-                  </button>
-                );
-              })}
+            <div className="space-y-2">
+              {([
+                {
+                  value: "bypassPermissions" as const,
+                  label: "Bypass all permissions",
+                  desc: "Full autonomy — no approval needed",
+                },
+                {
+                  value: "acceptEdits" as const,
+                  label: "Auto-accept edits",
+                  desc: "Approve file changes, ask for other tools",
+                },
+                {
+                  value: "default" as const,
+                  label: "Ask for approval",
+                  desc: "Prompt before any tool use",
+                },
+              ]).map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${
+                    permissionMode === opt.value
+                      ? "bg-hub-accent/10 border-hub-accent/30"
+                      : "bg-hub-surface-2 border-hub-border hover:border-hub-text-muted/30"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="permissionMode"
+                    value={opt.value}
+                    checked={permissionMode === opt.value}
+                    onChange={() => setPermissionMode(opt.value)}
+                    className="mt-0.5 accent-blue-500"
+                  />
+                  <div>
+                    <div className={`text-sm font-medium ${permissionMode === opt.value ? "text-hub-accent" : "text-hub-text"}`}>
+                      {opt.label}
+                    </div>
+                    <div className="text-xs text-hub-text-muted">{opt.desc}</div>
+                  </div>
+                </label>
+              ))}
             </div>
           </div>
 

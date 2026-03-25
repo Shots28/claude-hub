@@ -81,6 +81,7 @@ export function useRealtime(): RealtimeState {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages" },
         (payload) => {
+          console.log("[realtime] INSERT chat_message:", payload.new?.id);
           const newMsg = payload.new as DbMessage;
           setMessages((prev) => {
             // Deduplicate
@@ -93,13 +94,15 @@ export function useRealtime(): RealtimeState {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "chat_messages" },
         (payload) => {
+          console.log("[realtime] UPDATE chat_message:", payload.new?.id, "status:", (payload.new as any)?.status);
           const updated = payload.new as DbMessage;
           setMessages((prev) =>
             prev.map((m) => (m.id === updated.id ? updated : m)),
           );
         },
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.log("[realtime] Messages channel:", status, err || "");
         setConnected(status === "SUBSCRIBED");
       });
 
@@ -127,7 +130,9 @@ export function useRealtime(): RealtimeState {
           }
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log("[realtime] Instances channel:", status, err || "");
+      });
 
     // Permissions channel — subscribe to permission_requests table
     const permissionsChannel = sb

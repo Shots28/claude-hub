@@ -116,9 +116,8 @@ async function initBridge(
     console.error("[bridge] Run: set -a && source .env.local && set +a && node server.ts");
     process.exit(1);
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn("[bridge] ANTHROPIC_API_KEY not set — SDK will use mock mode");
-  }
+  // No ANTHROPIC_API_KEY needed — the SDK uses your existing Claude Code
+  // subscription auth from ~/.claude/
 
   // --- Import and instantiate InstanceManager ---
   // @ts-ignore — Node 22 native TS needs .ts extension, TS compiler disagrees

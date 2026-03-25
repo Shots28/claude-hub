@@ -2,6 +2,16 @@
 // Claude Hub — Local Bridge Server
 // Serves Next.js UI locally + bridges phone messages to Claude Code execution
 // Run: set -a && source .env.local && set +a && node server.ts
+//
+// Known limitations:
+// - Single-user only (no multi-user/multi-tenant support)
+// - Bridge must be running locally for messages to be processed
+// - No push notifications — uses polling + Supabase Realtime
+// - No offline mode — requires active Supabase connection
+// - Health metrics on Vercel show serverless stats, not bridge stats
+// - No code diff viewer — assistant responses are plain text/markdown
+// - MCP server path configurable via MCP_PLAN_REVIEW_PATH env var
+// - Bridge heartbeat (v2): uses discovered_repos table as lightweight store
 // ---------------------------------------------------------------------------
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
@@ -190,6 +200,16 @@ async function initBridge(
     }
   }
 
+  // Clean up orphaned streaming messages (left by crashed bridge)
+  const { count: orphanedCount } = await bridgeSupabase
+    .from("chat_messages")
+    .update({ status: "error", content: "[Bridge restarted — response interrupted]" })
+    .eq("status", "streaming")
+    .select("id", { count: "exact", head: true });
+  if (orphanedCount && orphanedCount > 0) {
+    console.log(`[bridge] Cleaned up ${orphanedCount} orphaned streaming messages`);
+  }
+
   // --- Supabase Realtime subscription (primary trigger) ---
   const channel = bridgeSupabase
     .channel("bridge-messages")
@@ -245,6 +265,10 @@ async function initBridge(
     });
 
   // --- Periodic poll fallback (every 30s) ---
+  // Deduplication: the poll only processes a queued instance if the latest message
+  // has role="user" (i.e., no assistant reply yet). Once the bridge responds, the
+  // latest message becomes role="assistant" and the poll won't re-trigger the same
+  // message. This prevents duplicate processing without explicit tracking.
   const pollInterval = setInterval(async () => {
     try {
       if (localInstanceIds.size === 0) return;
@@ -279,10 +303,26 @@ async function initBridge(
     }
   }, 30_000);
 
+  // --- Bridge heartbeat — update every 15s so the UI can detect if bridge is alive ---
+  const heartbeatInterval = setInterval(async () => {
+    try {
+      await bridgeSupabase
+        .from("discovered_repos")
+        .upsert({ path: "__bridge_heartbeat__", name: new Date().toISOString() });
+    } catch {}
+  }, 15_000);
+  // Write initial heartbeat immediately
+  try {
+    await bridgeSupabase
+      .from("discovered_repos")
+      .upsert({ path: "__bridge_heartbeat__", name: new Date().toISOString() });
+  } catch {}
+
   // --- Graceful shutdown ---
   async function shutdown(signal: string) {
     console.log(`\n[server] Received ${signal}, shutting down...`);
     clearInterval(pollInterval);
+    clearInterval(heartbeatInterval);
     if (refreshTimer) clearTimeout(refreshTimer);
     await bridgeSupabase.removeAllChannels();
     await manager.shutdown();

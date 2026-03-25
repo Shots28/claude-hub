@@ -26,7 +26,7 @@ export function CreateInstanceModal({
   const [name, setName] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [permissionMode, setPermissionMode] =
-    useState<PermissionMode>("bypassPermissions");
+    useState<PermissionMode>("acceptEdits");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,7 +112,7 @@ export function CreateInstanceModal({
         // Reset form
         setName("");
         setRepoPath("");
-        setPermissionMode("bypassPermissions");
+        setPermissionMode("acceptEdits");
         setSearchQuery("");
         setShowManual(false);
         onCreated();

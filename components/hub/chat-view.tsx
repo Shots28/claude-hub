@@ -128,6 +128,11 @@ export function ChatView({
     onInterrupt(instance.id);
   }, [instance.id, onInterrupt]);
 
+  // New Chat: clears the session_id so the next message starts a fresh Claude
+  // conversation. Previous messages remain visible (no visual separator needed —
+  // the user explicitly clicked "New Chat"). A system-message separator is not
+  // inserted because the messages API only creates role="user" rows; a client-side
+  // divider could be added in the future if desired.
   const handleNewChat = useCallback(async () => {
     if (clearingSession) return;
     setClearingSession(true);
@@ -137,7 +142,7 @@ export function ChatView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ current_session_id: null }),
       });
-      // Reload messages to show empty state
+      // Reload messages to reflect the cleared session
       await onLoadMessages(instance.id);
     } catch {
       // silently fail

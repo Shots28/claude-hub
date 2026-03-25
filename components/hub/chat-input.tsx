@@ -55,8 +55,8 @@ export function ChatInput({
   }, []);
 
   const handleSend = () => {
-    const trimmed = text.trim();
-    if (!trimmed || isQueued) return;
+    const trimmed = text.trim().replace(/\0/g, '');
+    if (!trimmed || trimmed.length > 50000 || isQueued) return;
 
     setSendStatus("sending");
     // Clear any existing fade timer

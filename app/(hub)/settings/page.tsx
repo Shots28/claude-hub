@@ -12,11 +12,17 @@ interface HealthData {
   timestamp: string;
 }
 
+interface BridgeStatus {
+  online: boolean;
+  lastSeen: string | null;
+}
+
 export default function SettingsPage() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
   const [cleaning, setCleaning] = useState(false);
   const [cleanMessage, setCleanMessage] = useState<string | null>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ online: false, lastSeen: null });
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -32,11 +38,35 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const fetchBridgeStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/repos/discover", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        const repos: { name: string; path: string }[] = data.repos ?? [];
+        const heartbeat = repos.find((r: { path: string }) => r.path === "__bridge_heartbeat__");
+        if (heartbeat) {
+          const lastSeen = heartbeat.name;
+          const age = Date.now() - new Date(lastSeen).getTime();
+          setBridgeStatus({ online: age < 60_000, lastSeen });
+        } else {
+          setBridgeStatus({ online: false, lastSeen: null });
+        }
+      }
+    } catch {
+      // silently fail
+    }
+  }, []);
+
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, 30_000);
+    fetchBridgeStatus();
+    const interval = setInterval(() => {
+      fetchHealth();
+      fetchBridgeStatus();
+    }, 30_000);
     return () => clearInterval(interval);
-  }, [fetchHealth]);
+  }, [fetchHealth, fetchBridgeStatus]);
 
   const handleCleanSessions = async () => {
     setCleaning(true);
@@ -76,6 +106,32 @@ export default function SettingsPage() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-2xl mx-auto px-4 py-6 md:py-8">
         <h1 className="text-lg font-semibold text-hub-text mb-6">Settings</h1>
+
+        {/* Bridge Status */}
+        <section className="mb-6">
+          <h2 className="text-xs font-medium text-hub-text-muted uppercase tracking-wider mb-3">
+            Bridge Status
+          </h2>
+          <div className="bg-hub-surface border border-hub-border rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-hub-text-muted">Local Bridge</span>
+              <span className={`text-sm font-medium flex items-center gap-1.5 ${bridgeStatus.online ? "text-emerald-400" : "text-red-400"}`}>
+                <span className={`w-2 h-2 rounded-full ${bridgeStatus.online ? "bg-emerald-500" : "bg-red-500"}`} />
+                {bridgeStatus.online ? "Online" : "Offline"}
+              </span>
+            </div>
+            {bridgeStatus.lastSeen && (
+              <p className="text-xs text-hub-text-muted mt-2">
+                Last seen: {new Date(bridgeStatus.lastSeen).toLocaleString()}
+              </p>
+            )}
+            {!bridgeStatus.online && (
+              <p className="text-xs text-hub-text-muted mt-2">
+                Bridge must be running locally for messages to be processed.
+              </p>
+            )}
+          </div>
+        </section>
 
         {/* System Health */}
         <section className="mb-6">

@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import type {
   InstanceStatus,
@@ -263,6 +264,21 @@ export class InstanceManager extends EventEmitter {
         ? JSON.parse(rawTools || "[]")
         : [];
 
+      // MCP server path is configurable via env var; skip if path doesn't exist
+      const mcpPath = process.env.MCP_PLAN_REVIEW_PATH || "/Users/agents/tools/plan-review-mcp";
+      let mcpServers: Record<string, any> | undefined;
+      if (existsSync(mcpPath)) {
+        mcpServers = {
+          "plan-review": {
+            type: "stdio",
+            command: "npx",
+            args: ["tsx", `${mcpPath}/src/index.ts`],
+          },
+        };
+      } else {
+        console.warn(`[InstanceManager] MCP plan-review path not found: ${mcpPath} — skipping MCP config`);
+      }
+
       const queryOptions: any = {
         cwd: instance.repo_path,
         includePartialMessages: true,
@@ -270,13 +286,7 @@ export class InstanceManager extends EventEmitter {
         permissionMode: ["bypassPermissions", "acceptEdits", "plan", "default"].includes(instance.permission_mode)
           ? instance.permission_mode
           : "default",
-        mcpServers: {
-          "plan-review": {
-            type: "stdio",
-            command: "npx",
-            args: ["tsx", "/Users/agents/tools/plan-review-mcp/src/index.ts"],
-          },
-        },
+        ...(mcpServers ? { mcpServers } : {}),
       };
 
       // Permission callback
@@ -312,6 +322,7 @@ export class InstanceManager extends EventEmitter {
             }
           })();
         } catch {
+          // Catches ALL errors from resume (any non-zero exit code, network failures, etc.)
           console.log(`[InstanceManager] Resume failed for ${instanceId}, starting fresh`);
           await this.supabase
             .from("instances")

@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
         id,
         name,
         repo_path: repoPath,
-        permission_mode: permissionMode ?? "bypassPermissions",
+        permission_mode: permissionMode ?? "acceptEdits",
         allowed_tools: [],
         status: "stopped",
       })

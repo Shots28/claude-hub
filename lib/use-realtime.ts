@@ -74,12 +74,12 @@ export function useRealtime(): RealtimeState {
   useEffect(() => {
     const sb = supabaseRef.current;
 
-    // Messages channel
+    // Messages channel — subscribe to chat_messages (the realtime relay table)
     const messagesChannel = sb
-      .channel("messages-changes")
+      .channel("chat-messages-changes")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        { event: "INSERT", schema: "public", table: "chat_messages" },
         (payload) => {
           const newMsg = payload.new as DbMessage;
           setMessages((prev) => {
@@ -91,7 +91,7 @@ export function useRealtime(): RealtimeState {
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages" },
+        { event: "UPDATE", schema: "public", table: "chat_messages" },
         (payload) => {
           const updated = payload.new as DbMessage;
           setMessages((prev) =>
@@ -129,12 +129,12 @@ export function useRealtime(): RealtimeState {
       )
       .subscribe();
 
-    // Permissions channel
+    // Permissions channel — subscribe to permission_requests table
     const permissionsChannel = sb
       .channel("permissions-changes")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "pending_permissions" },
+        { event: "*", schema: "public", table: "permission_requests" },
         (payload) => {
           if (payload.eventType === "INSERT") {
             const perm = payload.new as DbPendingPermission;
@@ -178,6 +178,20 @@ export function useRealtime(): RealtimeState {
 
   const sendMessage = useCallback(
     async (instanceId: string, text: string) => {
+      // Optimistic UI — show message immediately
+      const optimisticId = `optimistic-${Date.now()}`;
+      const optimisticMsg: DbMessage = {
+        id: optimisticId,
+        instance_id: instanceId,
+        role: "user",
+        content: text,
+        tool_name: null,
+        tool_id: null,
+        is_error: false,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, optimisticMsg]);
+
       try {
         const res = await fetch(`/api/instances/${instanceId}/messages`, {
           method: "POST",
@@ -185,10 +199,21 @@ export function useRealtime(): RealtimeState {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: text }),
         });
-        if (!res.ok) {
+        if (res.ok) {
+          // Replace optimistic message with real one from server
+          const data = await res.json();
+          if (data.message) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === optimisticId ? data.message : m)),
+            );
+          }
+        } else {
+          // Remove optimistic message on failure
+          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
           console.error("[realtime] sendMessage failed:", res.status);
         }
       } catch (err) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         console.error("[realtime] sendMessage error:", err);
       }
     },

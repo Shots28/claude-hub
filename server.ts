@@ -205,8 +205,14 @@ async function initBridge(
         const { instance_id: instanceId, content } = payload.new;
         if (!instanceId || !content) return;
 
-        // Only process local instances (cached, no DB call)
-        if (!localInstanceIds.has(instanceId)) return;
+        // Only process local instances — check cache first, then DB fallback
+        if (!localInstanceIds.has(instanceId)) {
+          // Cache miss — check DB directly (handles race with newly created instances)
+          const inst = await manager.getInstance(instanceId);
+          if (!inst || !localRepoPaths.has(inst.repo_path)) return;
+          // Update cache
+          localInstanceIds.add(instanceId);
+        }
 
         // Skip if already running
         if (manager.isRunning(instanceId)) {

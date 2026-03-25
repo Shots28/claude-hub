@@ -73,66 +73,74 @@ export function useRealtime(): RealtimeState {
     }
   }, []);
 
-  // -- Polling fallback: poll for updates when streaming (Realtime backup) --
-  useEffect(() => {
-    // Check if there's a streaming message
-    const hasStreamingMsg = messages.some(
-      (m) => m.role === "assistant" && m.status === "streaming"
-    );
+  // -- Polling fallback: always poll while waiting for a response --
+  // This is the primary mechanism for seeing responses since Supabase
+  // Realtime may not work reliably in all browser/mobile contexts.
+  const pollingActiveRef = useRef(false);
 
-    // Clear existing poll interval
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
+  const startPolling = useCallback((instanceId: string) => {
+    if (pollingActiveRef.current) return;
+    pollingActiveRef.current = true;
+    console.log("[realtime] Starting message polling for", instanceId);
 
-    // Start polling if streaming and we have an active instance
-    if (hasStreamingMsg && activeInstanceRef.current) {
-      console.log("[realtime] Starting polling fallback for streaming message");
-      const instanceId = activeInstanceRef.current;
+    const poll = async () => {
+      if (!pollingActiveRef.current) return;
+      try {
+        const res = await fetch(`/api/instances/${instanceId}/messages`, {
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const fetchedMsgs: DbMessage[] = data.messages ?? [];
+          setMessages((prev) => {
+            const merged = [...prev];
+            let changed = false;
+            for (const msg of fetchedMsgs) {
+              const idx = merged.findIndex((m) => m.id === msg.id);
+              if (idx >= 0) {
+                if (merged[idx].content !== msg.content || merged[idx].status !== msg.status) {
+                  merged[idx] = msg;
+                  changed = true;
+                }
+              } else if (!msg.id.startsWith("optimistic-")) {
+                merged.push(msg);
+                changed = true;
+              }
+            }
+            return changed ? merged : prev;
+          });
 
-      pollIntervalRef.current = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/instances/${instanceId}/messages`, {
+          // Check if there's still a streaming/pending response
+          const stillStreaming = fetchedMsgs.some(
+            (m) => m.role === "assistant" && m.status === "streaming"
+          );
+          // Also check if instance is still queued (bridge hasn't started yet)
+          const instRes = await fetch(`/api/instances/${instanceId}`, {
             credentials: "include",
           });
-          if (res.ok) {
-            const data = await res.json();
-            const fetchedMsgs = data.messages ?? [];
-            setMessages((prev) => {
-              // Merge fetched messages with existing ones
-              const merged = [...prev];
-              for (const msg of fetchedMsgs) {
-                const idx = merged.findIndex((m) => m.id === msg.id);
-                if (idx >= 0) {
-                  // Update existing message if content changed
-                  if (merged[idx].content !== msg.content || merged[idx].status !== msg.status) {
-                    merged[idx] = msg;
-                  }
-                } else if (!msg.id.startsWith("optimistic-")) {
-                  merged.push(msg);
-                }
-              }
-              return merged;
-            });
-          }
-        } catch {
-          // silently fail polling
-        }
-      }, 500); // Poll every 500ms during streaming
-    }
+          const instData = instRes.ok ? await instRes.json() : null;
+          const instStatus = instData?.instance?.status;
+          const stillBusy = instStatus === "running" || instStatus === "queued";
 
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+          if (!stillStreaming && !stillBusy) {
+            console.log("[realtime] Polling complete — response done");
+            pollingActiveRef.current = false;
+            return;
+          }
+        }
+      } catch {
+        // silently fail
+      }
+
+      // Continue polling
+      if (pollingActiveRef.current) {
+        pollIntervalRef.current = setTimeout(poll, 1000);
       }
     };
-  }, [messages]);
 
-  // -- Track active instance for polling fallback --
-  const activeInstanceRef = useRef<string | null>(null);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    // Start first poll after a short delay
+    pollIntervalRef.current = setTimeout(poll, 500);
+  }, []);
 
   // -- Subscribe to Realtime channels --
   useEffect(() => {
@@ -245,6 +253,8 @@ export function useRealtime(): RealtimeState {
       sb.removeChannel(messagesChannel);
       sb.removeChannel(instancesChannel);
       sb.removeChannel(permissionsChannel);
+      pollingActiveRef.current = false;
+      if (pollIntervalRef.current) clearTimeout(pollIntervalRef.current);
     };
   }, [refreshInstances]);
 
@@ -282,6 +292,8 @@ export function useRealtime(): RealtimeState {
               prev.map((m) => (m.id === optimisticId ? data.message : m)),
             );
           }
+          // Start polling for the response
+          startPolling(instanceId);
         } else {
           // Remove optimistic message on failure
           setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
@@ -292,7 +304,7 @@ export function useRealtime(): RealtimeState {
         console.error("[realtime] sendMessage error:", err);
       }
     },
-    [],
+    [startPolling],
   );
 
   const interrupt = useCallback(async (instanceId: string) => {

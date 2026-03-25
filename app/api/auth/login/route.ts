@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       .from("users")
       .select("*")
       .eq("username", username)
-      .maybeSingle() as { data: { id: string; username: string; password_hash: string } | null; error: any };
+      .maybeSingle() as { data: { id: string; username: string; password_hash: string; jwt_generation: number } | null; error: any };
 
     if (fetchError) {
       console.error("[auth/login] DB error:", fetchError);
@@ -52,8 +52,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Sign JWT and set cookie
-    const token = await signJwt({ sub: user.id, username: user.username });
+    // Sign JWT with generation counter for server-side revocation
+    const token = await signJwt({ sub: user.id, username: user.username, gen: user.jwt_generation ?? 1 });
 
     const response = NextResponse.json(
       { ok: true, user: { id: user.id, username: user.username } },

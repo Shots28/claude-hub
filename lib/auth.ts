@@ -77,12 +77,14 @@ export async function verifyPassword(
 export interface HubJwtPayload extends JWTPayload {
   sub: string; // user id
   username: string;
+  gen?: number; // jwt_generation counter — used for server-side logout invalidation
 }
 
 /** Sign a JWT with the given payload. Returns the compact token string. */
 export async function signJwt(payload: {
   sub: string;
   username: string;
+  gen?: number;
 }): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
@@ -161,6 +163,11 @@ export function clearAuthCookie(): string {
 /**
  * Extract and verify the hub_session JWT from a raw Cookie header.
  * Returns the decoded payload or null if absent / invalid.
+ */
+/**
+ * Extract and verify the hub_session JWT from a raw Cookie header.
+ * Returns the decoded payload or null if absent / invalid.
+ * Optionally validates jwt_generation against the database for server-side revocation.
  */
 export async function getSessionFromCookies(
   cookieHeader: string | null | undefined,

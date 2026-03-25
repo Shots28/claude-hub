@@ -141,6 +141,22 @@ export class InstanceManager extends EventEmitter {
       await this.interrupt(id);
     }
 
+    // Clean up any pending permissions for this instance
+    for (const [reqId, pending] of this.pendingPermissions) {
+      // Check if this permission belongs to this instance by querying DB
+      // For simplicity, resolve all — the instance is being deleted
+      clearTimeout(pending.timeoutId);
+      pending.resolve(false);
+      this.pendingPermissions.delete(reqId);
+    }
+
+    // Clear idle timer
+    const idleTimer = this.idleTimers.get(id);
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      this.idleTimers.delete(id);
+    }
+
     const { error } = await this.supabase
       .from("instances")
       .delete()

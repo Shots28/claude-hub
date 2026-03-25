@@ -76,9 +76,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Input validation
+    if (typeof name !== "string" || name.length > 100) {
+      return NextResponse.json(
+        { error: "name must be a string under 100 characters" },
+        { status: 400 },
+      );
+    }
+    if (typeof repoPath !== "string" || !repoPath.startsWith("/")) {
+      return NextResponse.json(
+        { error: "repoPath must be an absolute path" },
+        { status: 400 },
+      );
+    }
+
     const id = randomUUID();
 
     // Single-user app — no user_id needed
+    // allowed_tools is JSONB in Supabase, pass array directly
     const { data, error } = await (supabase
       .from("instances") as any)
       .insert({
@@ -86,7 +101,7 @@ export async function POST(req: NextRequest) {
         name,
         repo_path: repoPath,
         permission_mode: permissionMode ?? "auto",
-        allowed_tools: JSON.stringify(allowedTools ?? []),
+        allowed_tools: allowedTools ?? [],
         status: "stopped",
       })
       .select()

@@ -24,8 +24,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // Filter out the __bridge_heartbeat__ sentinel row server-side
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/discovered_repos?select=name,path&order=name.asc`,
+      `${supabaseUrl}/rest/v1/discovered_repos?select=name,path&path=neq.__bridge_heartbeat__&order=name.asc`,
       {
         headers: {
           apikey: supabaseKey,

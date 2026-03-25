@@ -201,13 +201,27 @@ async function initBridge(
   }
 
   // Clean up orphaned streaming messages (left by crashed bridge)
-  const { count: orphanedCount } = await bridgeSupabase
+  // Also reset any associated instances that are stuck in non-idle states
+  const { data: orphanedMsgs } = await bridgeSupabase
     .from("chat_messages")
-    .update({ status: "error", content: "[Bridge restarted — response interrupted]" })
-    .eq("status", "streaming")
-    .select("id", { count: "exact", head: true });
-  if (orphanedCount && orphanedCount > 0) {
-    console.log(`[bridge] Cleaned up ${orphanedCount} orphaned streaming messages`);
+    .select("id, instance_id")
+    .eq("status", "streaming");
+
+  if (orphanedMsgs?.length) {
+    await bridgeSupabase
+      .from("chat_messages")
+      .update({ status: "error", content: "[Bridge restarted — response interrupted]" })
+      .eq("status", "streaming");
+
+    // Reset associated instances to idle
+    const orphanedInstanceIds = [...new Set(orphanedMsgs.map((m: any) => m.instance_id))];
+    await bridgeSupabase
+      .from("instances")
+      .update({ status: "idle", error_message: "Bridge restarted during execution", updated_at: new Date().toISOString() })
+      .in("id", orphanedInstanceIds)
+      .eq("status", "running");
+
+    console.log(`[bridge] Cleaned up ${orphanedMsgs.length} orphaned streaming messages`);
   }
 
   // --- Supabase Realtime subscription (primary trigger) ---

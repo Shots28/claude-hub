@@ -11,7 +11,7 @@
 // - Health metrics on Vercel show serverless stats, not bridge stats
 // - No code diff viewer — assistant responses are plain text/markdown
 // - MCP server path configurable via MCP_PLAN_REVIEW_PATH env var
-// - Bridge heartbeat (v2): uses discovered_repos table as lightweight store
+// - Bridge heartbeat: uses dedicated bridge_status table
 // ---------------------------------------------------------------------------
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
@@ -321,15 +321,15 @@ async function initBridge(
   const heartbeatInterval = setInterval(async () => {
     try {
       await bridgeSupabase
-        .from("discovered_repos")
-        .upsert({ path: "__bridge_heartbeat__", name: new Date().toISOString() });
+        .from("bridge_status")
+        .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
     } catch {}
   }, 15_000);
   // Write initial heartbeat immediately
   try {
     await bridgeSupabase
       .from("discovered_repos")
-      .upsert({ path: "__bridge_heartbeat__", name: new Date().toISOString() });
+      .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
   } catch {}
 
   // --- Graceful shutdown ---

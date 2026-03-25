@@ -1,7 +1,6 @@
 // ---------------------------------------------------------------------------
-// GET /api/repos/discover — Return discovered repos from Supabase
-// The local bridge scans the filesystem and syncs results to the DB.
-// This route just reads from the DB so it works on Vercel too.
+// GET /api/bridge/status — Check if the local bridge is online
+// Reads from the dedicated bridge_status table (updated every 15s by bridge)
 // ---------------------------------------------------------------------------
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,14 +17,11 @@ export async function GET(req: NextRequest) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json(
-        { error: "Supabase not configured" },
-        { status: 500 },
-      );
+      return NextResponse.json({ online: false, lastHeartbeat: null });
     }
 
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/discovered_repos?select=name,path&order=name.asc`,
+      `${supabaseUrl}/rest/v1/bridge_status?id=eq.default&select=last_heartbeat_at,status`,
       {
         headers: {
           apikey: supabaseKey,
@@ -36,21 +32,23 @@ export async function GET(req: NextRequest) {
     );
 
     if (!res.ok) {
-      const text = await res.text();
-      console.error("[repos/discover] Supabase error:", text);
-      return NextResponse.json(
-        { error: "Database error" },
-        { status: 500 },
-      );
+      return NextResponse.json({ online: false, lastHeartbeat: null });
     }
 
-    const repos = await res.json();
-    return NextResponse.json({ repos }, { status: 200 });
-  } catch (err) {
-    console.error("[repos/discover] Unexpected error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    const rows = await res.json();
+    if (!rows?.length) {
+      return NextResponse.json({ online: false, lastHeartbeat: null });
+    }
+
+    const { last_heartbeat_at } = rows[0];
+    const age = Date.now() - new Date(last_heartbeat_at).getTime();
+    const online = age < 60_000; // Online if heartbeat < 60s old
+
+    return NextResponse.json({
+      online,
+      lastHeartbeat: last_heartbeat_at,
+    });
+  } catch {
+    return NextResponse.json({ online: false, lastHeartbeat: null });
   }
 }

@@ -40,21 +40,18 @@ export default function SettingsPage() {
 
   const fetchBridgeStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/repos/discover", { credentials: "include" });
+      const res = await fetch("/api/bridge/status", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        const repos: { name: string; path: string }[] = data.repos ?? [];
-        const heartbeat = repos.find((r: { path: string }) => r.path === "__bridge_heartbeat__");
-        if (heartbeat) {
-          const lastSeen = heartbeat.name;
-          const age = Date.now() - new Date(lastSeen).getTime();
-          setBridgeStatus({ online: age < 60_000, lastSeen });
-        } else {
-          setBridgeStatus({ online: false, lastSeen: null });
-        }
+        setBridgeStatus({
+          online: data.online ?? false,
+          lastSeen: data.lastHeartbeat ?? null,
+        });
+      } else {
+        setBridgeStatus({ online: false, lastSeen: null });
       }
     } catch {
-      // silently fail
+      setBridgeStatus({ online: false, lastSeen: null });
     }
   }, []);
 

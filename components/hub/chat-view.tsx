@@ -105,17 +105,13 @@ export function ChatView({
     [pendingPermissions, instance.id],
   );
 
-  // Detect streaming: last assistant message that might still be updating
+  // Detect streaming: find assistant message with status === "streaming"
   useEffect(() => {
-    if (instance.status === "running" && instanceMessages.length > 0) {
-      const last = instanceMessages[instanceMessages.length - 1];
-      if (last.role === "assistant" && !last.tool_name) {
-        setStreamingId(last.id);
-      }
-    } else {
-      setStreamingId(null);
-    }
-  }, [instance.status, instanceMessages]);
+    const streamingMsg = instanceMessages.find(
+      (m) => m.role === "assistant" && m.status === "streaming"
+    );
+    setStreamingId(streamingMsg?.id ?? null);
+  }, [instanceMessages]);
 
   const handleSend = useCallback(
     (text: string) => {

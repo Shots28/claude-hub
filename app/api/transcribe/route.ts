@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     whisperForm.append("file", audio, "recording.webm");
     whisperForm.append("model", "whisper-1");
     whisperForm.append("response_format", "text");
+    whisperForm.append("language", "en"); // Force English transcription
 
     const whisperRes = await fetch(
       "https://api.openai.com/v1/audio/transcriptions",

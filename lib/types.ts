@@ -180,6 +180,7 @@ export type DbMessage = {
   tool_name: string | null;
   tool_id: string | null;
   is_error: boolean;
+  status?: "pending" | "streaming" | "done";
   created_at: string;
 };
 

@@ -352,11 +352,14 @@ export class InstanceManager extends EventEmitter {
               this.emit("text_delta", instanceId, delta.text);
 
               // Update assistant message periodically (configurable via STREAMING_DEBOUNCE_CHARS)
-              const debounceChars = parseInt(process.env.STREAMING_DEBOUNCE_CHARS || "500", 10);
-              if (fullText.length % debounceChars < delta.text.length) {
+              // Lower default to 50 chars for more responsive streaming
+              const debounceChars = parseInt(process.env.STREAMING_DEBOUNCE_CHARS || "50", 10);
+              // Always update on first chunk, then debounce subsequent updates
+              const isFirstUpdate = fullText.length === delta.text.length;
+              if (isFirstUpdate || fullText.length % debounceChars < delta.text.length) {
                 await this.supabase
                   .from("chat_messages")
-                  .update({ content: fullText })
+                  .update({ content: fullText, status: "streaming" })
                   .eq("id", assistantMsgId);
               }
             }

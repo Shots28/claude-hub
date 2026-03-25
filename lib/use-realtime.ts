@@ -188,6 +188,7 @@ export function useRealtime(): RealtimeState {
         tool_name: null,
         tool_id: null,
         is_error: false,
+        status: "done",
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, optimisticMsg]);

@@ -270,12 +270,9 @@ export class InstanceManager extends EventEmitter {
         cwd: instance.repo_path,
         includePartialMessages: true,
         allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
-        permissionMode:
-          instance.permission_mode === "bypassPermissions"
-            ? "bypassPermissions"
-            : instance.permission_mode === "acceptEdits"
-            ? "acceptEdits"
-            : "default",
+        permissionMode: ["bypassPermissions", "acceptEdits", "plan", "default"].includes(instance.permission_mode)
+          ? instance.permission_mode
+          : "default",
       };
 
       // Resume session if we have one

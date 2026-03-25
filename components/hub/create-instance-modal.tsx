@@ -321,6 +321,11 @@ export function CreateInstanceModal({
                   desc: "Approve file changes, ask for other tools",
                 },
                 {
+                  value: "plan" as const,
+                  label: "Plan mode",
+                  desc: "Create a plan first, then execute with approval",
+                },
+                {
                   value: "default" as const,
                   label: "Ask for approval",
                   desc: "Prompt before any tool use",

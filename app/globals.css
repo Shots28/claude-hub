@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme {
+  --color-hub-bg: #0a0a0a;
+  --color-hub-surface: #141414;
+  --color-hub-surface-2: #1e1e1e;
+  --color-hub-border: #2a2a2a;
+  --color-hub-text: #e5e5e5;
+  --color-hub-text-muted: #a3a3a3;
+  --color-hub-accent: #3b82f6;
+  --color-hub-accent-hover: #2563eb;
+  --color-hub-success: #22c55e;
+  --color-hub-warning: #eab308;
+  --color-hub-error: #ef4444;
+}
+
+/* Smooth scrolling for chat */
+.scroll-smooth-chat {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Blinking cursor for streaming */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+/* Pulse animation for running status */
+@keyframes pulse-status {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.pulse-running {
+  animation: pulse-status 2s ease-in-out infinite;
+}
+
+/* Permission banner slide-in */
+@keyframes slide-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out;
+}
+
+/* Modal backdrop fade */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Modal scale up */
+@keyframes scale-up {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.animate-scale-up {
+  animation: scale-up 0.2s ease-out;
+}
+
+/* Hide scrollbar but allow scrolling */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

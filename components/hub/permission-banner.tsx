@@ -1,0 +1,105 @@
+"use client";
+// ---------------------------------------------------------------------------
+// PermissionBanner — Sticky banner for pending permission requests
+// ---------------------------------------------------------------------------
+
+import { useEffect, useState } from "react";
+import type { DbPendingPermission } from "@/lib/types";
+
+interface PermissionBannerProps {
+  permission: DbPendingPermission;
+  onApprove: (id: string) => void;
+  onDeny: (id: string) => void;
+}
+
+// Default timeout: 2 minutes from request time
+const TIMEOUT_MS = 2 * 60 * 1000;
+
+export function PermissionBanner({
+  permission,
+  onApprove,
+  onDeny,
+}: PermissionBannerProps) {
+  const [remainingMs, setRemainingMs] = useState(() => {
+    const requested = new Date(permission.requested_at).getTime();
+    const expiresAt = requested + TIMEOUT_MS;
+    return Math.max(0, expiresAt - Date.now());
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const requested = new Date(permission.requested_at).getTime();
+      const expiresAt = requested + TIMEOUT_MS;
+      const remaining = Math.max(0, expiresAt - Date.now());
+      setRemainingMs(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [permission.requested_at]);
+
+  const minutes = Math.floor(remainingMs / 60_000);
+  const seconds = Math.floor((remainingMs % 60_000) / 1000);
+  const timeStr = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+  const isExpired = remainingMs <= 0;
+
+  return (
+    <div className="animate-slide-down sticky top-0 z-20 bg-amber-500/10 border-b border-amber-500/30 px-4 py-3">
+      <div className="max-w-3xl mx-auto flex items-center gap-3">
+        {/* Warning icon */}
+        <div className="flex-shrink-0">
+          <svg
+            className="w-5 h-5 text-amber-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+            />
+          </svg>
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-amber-200">
+            Permission requested:{" "}
+            <span className="font-mono text-amber-100">
+              {permission.tool_name}
+            </span>
+          </div>
+          <div className="text-xs text-amber-300/70 mt-0.5">
+            {isExpired ? "Expired" : `Expires in ${timeStr}`}
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => onDeny(permission.id)}
+            disabled={isExpired}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-700 active:bg-red-800 text-white disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/50"
+          >
+            Deny
+          </button>
+          <button
+            type="button"
+            onClick={() => onApprove(permission.id)}
+            disabled={isExpired}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+          >
+            Approve
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

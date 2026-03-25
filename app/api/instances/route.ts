@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
         id,
         name: sanitizedName,
         repo_path: repoPath,
-        permission_mode: permissionMode ?? "acceptEdits",
+        permission_mode: permissionMode ?? "bypassPermissions",
         allowed_tools: [],
         status: "stopped",
         model: instanceModel,

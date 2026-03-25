@@ -1,6 +1,6 @@
 "use client";
 // ---------------------------------------------------------------------------
-// ChatInput — Text input with send/interrupt toggle
+// ChatInput — Text input with send/interrupt/voice toggle
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -23,8 +23,12 @@ export function ChatInput({
 }: ChatInputProps) {
   const [text, setText] = useState("");
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   const isRunning = instanceStatus === "running";
   const isQueued = instanceStatus === "queued";
@@ -42,12 +46,10 @@ export function ChatInput({
     adjustHeight();
   }, [text, adjustHeight]);
 
-  // Auto-focus on mount
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
-  // Clean up fade timer on unmount
   useEffect(() => {
     return () => {
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
@@ -55,29 +57,23 @@ export function ChatInput({
   }, []);
 
   const handleSend = () => {
-    const trimmed = text.trim().replace(/\0/g, '');
+    const trimmed = text.trim().replace(/\0/g, "");
     if (!trimmed || trimmed.length > 50000 || isQueued) return;
 
     setSendStatus("sending");
-    // Clear any existing fade timer
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
 
     try {
       onSend(trimmed);
       setText("");
-      // Reset height after clearing
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
       setSendStatus("sent");
-      fadeTimerRef.current = setTimeout(() => {
-        setSendStatus("idle");
-      }, 2000);
+      fadeTimerRef.current = setTimeout(() => setSendStatus("idle"), 2000);
     } catch {
       setSendStatus("failed");
-      fadeTimerRef.current = setTimeout(() => {
-        setSendStatus("idle");
-      }, 3000);
+      fadeTimerRef.current = setTimeout(() => setSendStatus("idle"), 3000);
     }
   };
 
@@ -92,53 +88,96 @@ export function ChatInput({
     }
   };
 
+  // --- Voice recording ---
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks
+        stream.getTracks().forEach((t) => t.stop());
+
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (blob.size < 100) return; // Too short
+
+        setTranscribing(true);
+        try {
+          const formData = new FormData();
+          formData.append("audio", blob);
+
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            credentials: "include",
+            body: formData,
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+              setText((prev) => (prev ? prev + " " + data.text : data.text));
+              textareaRef.current?.focus();
+            }
+          }
+        } catch {
+          // Silently fail
+        } finally {
+          setTranscribing(false);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setRecording(true);
+    } catch {
+      // Mic not available
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+    }
+  };
+
+  const toggleRecording = () => {
+    if (recording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
   return (
     <div className="border-t border-hub-border bg-hub-bg px-3 py-3 safe-area-bottom">
       <div className="flex items-end gap-2 max-w-3xl mx-auto">
-        <div className="flex-1 relative">
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isQueued
-                ? "Queued..."
-                : isRunning
-                  ? "Press Enter to interrupt, or type a new message..."
-                  : "Message Claude..."
-            }
-            disabled={disabled || isQueued}
-            rows={1}
-            className="w-full bg-hub-surface-2 border border-hub-border rounded-xl px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 disabled:opacity-50 transition-colors"
-          />
-        </div>
-
-        {isRunning ? (
-          // Interrupt button (red square)
-          <button
-            type="button"
-            onClick={onInterrupt}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-700 active:bg-red-800 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/50"
-            aria-label="Interrupt"
-          >
-            <svg
-              className="w-4 h-4 text-white"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <rect x="6" y="6" width="12" height="12" rx="2" />
-            </svg>
-          </button>
-        ) : (
-          // Send button
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={!canSend}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 disabled:bg-hub-surface-2 disabled:text-hub-text-muted/30 transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
-            aria-label="Send"
-          >
+        {/* Voice button */}
+        <button
+          type="button"
+          onClick={toggleRecording}
+          disabled={disabled || isQueued || transcribing}
+          className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-colors focus:outline-none ${
+            recording
+              ? "bg-red-600 text-white animate-pulse"
+              : transcribing
+                ? "bg-hub-surface-2 text-hub-text-muted opacity-50"
+                : "bg-hub-surface-2 text-hub-text-muted hover:text-hub-text hover:bg-hub-border"
+          }`}
+          aria-label={recording ? "Stop recording" : "Voice input"}
+        >
+          {transcribing ? (
+            <div className="w-4 h-4 border-2 border-hub-text-muted/30 border-t-hub-accent rounded-full animate-spin" />
+          ) : (
             <svg
               className="w-4 h-4"
               fill="none"
@@ -149,30 +188,82 @@ export function ChatInput({
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
+                d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
               />
+            </svg>
+          )}
+        </button>
+
+        <div className="flex-1 relative">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              transcribing
+                ? "Transcribing..."
+                : recording
+                  ? "Recording... tap mic to stop"
+                  : isQueued
+                    ? "Queued..."
+                    : isRunning
+                      ? "Press Enter to interrupt, or type..."
+                      : "Message Claude..."
+            }
+            disabled={disabled || isQueued}
+            rows={1}
+            className="w-full bg-hub-surface-2 border border-hub-border rounded-xl px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 disabled:opacity-50 transition-colors"
+          />
+        </div>
+
+        {isRunning ? (
+          <button
+            type="button"
+            onClick={onInterrupt}
+            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-700 active:bg-red-800 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/50"
+            aria-label="Interrupt"
+          >
+            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend}
+            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 disabled:bg-hub-surface-2 disabled:text-hub-text-muted/30 transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
+            aria-label="Send"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
             </svg>
           </button>
         )}
       </div>
 
-      {/* Send status indicator */}
-      {sendStatus !== "idle" && (
+      {/* Status indicators */}
+      {(sendStatus !== "idle" || recording) && (
         <div className="max-w-3xl mx-auto mt-1.5 px-1">
           <span
-            className={`text-[11px] transition-opacity duration-500 ${
-              sendStatus === "sending"
-                ? "text-hub-text-muted"
-                : sendStatus === "sent"
-                  ? "text-emerald-400"
-                  : "text-red-400"
+            className={`text-[11px] ${
+              recording
+                ? "text-red-400"
+                : sendStatus === "sending"
+                  ? "text-hub-text-muted"
+                  : sendStatus === "sent"
+                    ? "text-emerald-400"
+                    : "text-red-400"
             }`}
           >
-            {sendStatus === "sending"
-              ? "Sending..."
-              : sendStatus === "sent"
-                ? "Sent"
-                : "Failed to send"}
+            {recording
+              ? "Recording..."
+              : sendStatus === "sending"
+                ? "Sending..."
+                : sendStatus === "sent"
+                  ? "Sent"
+                  : "Failed to send"}
           </span>
         </div>
       )}

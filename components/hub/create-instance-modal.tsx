@@ -28,9 +28,9 @@ export function CreateInstanceModal({
   const [name, setName] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [permissionMode, setPermissionMode] =
-    useState<PermissionMode>("acceptEdits");
-  const [model, setModel] = useState("sonnet");
-  const [extendedThinking, setExtendedThinking] = useState(false);
+    useState<PermissionMode>("bypassPermissions");
+  const [model, setModel] = useState("opus");
+  const [extendedThinking, setExtendedThinking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -127,7 +127,7 @@ export function CreateInstanceModal({
         // Reset form
         setName("");
         setRepoPath("");
-        setPermissionMode("acceptEdits");
+        setPermissionMode("bypassPermissions");
         setModel("sonnet");
         setExtendedThinking(false);
         setSearchQuery("");

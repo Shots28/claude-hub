@@ -120,6 +120,24 @@ async function initBridge(
 ) {
   // --- Env validation ---
   const REQUIRED_ENV = ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "JWT_SECRET"];
+
+  // Validate optional numeric env vars
+  const numericEnvVars = {
+    MAX_CONCURRENT_QUERIES: { default: 3, min: 1, max: 20 },
+    IDLE_TIMEOUT_MINUTES: { default: 30, min: 1, max: 1440 },
+    SHUTDOWN_TIMEOUT_MS: { default: 30000, min: 5000, max: 300000 },
+    STREAMING_DEBOUNCE_CHARS: { default: 500, min: 50, max: 5000 },
+  };
+  for (const [key, { min, max }] of Object.entries(numericEnvVars)) {
+    const val = process.env[key];
+    if (val !== undefined) {
+      const num = parseInt(val, 10);
+      if (isNaN(num) || num < min || num > max) {
+        console.error(`[bridge] Invalid ${key}=${val} (must be ${min}-${max}), using default`);
+        delete process.env[key]; // Fall back to default
+      }
+    }
+  }
   const envMissing = REQUIRED_ENV.filter((k) => !process.env[k]);
   if (envMissing.length > 0) {
     console.error(`[bridge] Missing env vars: ${envMissing.join(", ")}`);

@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
       .from("instances")
       .select("*")
       .eq("id", id)
-      .eq("user_id", session.sub)
+      /* single-user: no user_id filter */
       .maybeSingle();
 
     if (error) {
@@ -102,7 +102,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       .from("instances")
       .update(updates)
       .eq("id", id)
-      .eq("user_id", session.sub)
+      /* single-user: no user_id filter */
       .select()
       .single();
 
@@ -147,7 +147,7 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       .from("instances")
       .select("id")
       .eq("id", id)
-      .eq("user_id", session.sub)
+      /* single-user: no user_id filter */
       .maybeSingle();
 
     if (fetchError) {
@@ -169,7 +169,7 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       .from("instances")
       .delete()
       .eq("id", id)
-      .eq("user_id", session.sub);
+      /* single-user: no user_id filter */;
 
     if (deleteError) {
       console.error("[instances/DELETE/:id] DB delete error:", deleteError);

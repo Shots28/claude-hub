@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const { data: userInstances } = await supabase
       .from("instances")
       .select("id")
-      .eq("user_id", session.sub);
+      ;
 
     if (!userInstances || userInstances.length === 0) {
       return NextResponse.json(
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
     // Delete old resolved permissions
     await supabase
-      .from("pending_permissions")
+      .from("permission_requests")
       .delete()
       .in("instance_id", instanceIds)
       .neq("status", "pending")

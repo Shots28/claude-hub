@@ -27,10 +27,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Single-user app — no user_id filter needed
     const { data, error } = await supabase
       .from("instances")
       .select("*")
-      .eq("user_id", session.sub)
       .order("sort_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 
@@ -78,20 +78,16 @@ export async function POST(req: NextRequest) {
 
     const id = randomUUID();
 
-    const { data, error } = await supabase
-      .from("instances")
+    // Single-user app — no user_id needed
+    const { data, error } = await (supabase
+      .from("instances") as any)
       .insert({
         id,
-        user_id: session.sub,
         name,
         repo_path: repoPath,
         permission_mode: permissionMode ?? "auto",
-        allowed_tools: allowedTools ?? [],
-        status: "idle",
-        current_session_id: null,
-        error: null,
-        last_message_preview: null,
-        last_activity_at: null,
+        allowed_tools: JSON.stringify(allowedTools ?? []),
+        status: "stopped",
       })
       .select()
       .single();

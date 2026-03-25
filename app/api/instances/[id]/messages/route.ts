@@ -21,7 +21,7 @@ async function verifyOwnership(instanceId: string, userId: string) {
     .from("instances")
     .select("id")
     .eq("id", instanceId)
-    .eq("user_id", userId)
+    
     .maybeSingle();
   return !!data;
 }

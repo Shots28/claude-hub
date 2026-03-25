@@ -28,12 +28,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
       );
     }
 
-    // Fetch the permission and verify it belongs to an instance owned by this user
+    // Fetch the permission request (single-user: no ownership check needed)
     const { data: permission, error: fetchError } = await supabase
-      .from("pending_permissions")
-      .select("*, instances!inner(user_id)")
+      .from("permission_requests")
+      .select("*")
       .eq("id", permissionId)
-      .maybeSingle();
+      .maybeSingle() as { data: any; error: any };
 
     if (fetchError) {
       console.error("[permissions/resolve] DB fetch error:", fetchError);
@@ -44,17 +44,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
 
     if (!permission) {
-      return NextResponse.json(
-        { error: "Permission not found" },
-        { status: 404 },
-      );
-    }
-
-    // Verify ownership through the instance relationship
-    const instanceData = permission.instances as unknown as {
-      user_id: string;
-    };
-    if (instanceData?.user_id !== session.sub) {
       return NextResponse.json(
         { error: "Permission not found" },
         { status: 404 },
@@ -72,7 +61,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const newStatus = action === "approve" ? "approved" : "denied";
 
     const { error: updateError } = await supabase
-      .from("pending_permissions")
+      .from("permission_requests")
       .update({
         status: newStatus,
         resolved_at: new Date().toISOString(),

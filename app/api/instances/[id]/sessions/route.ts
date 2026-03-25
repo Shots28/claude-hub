@@ -31,7 +31,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
       .from("instances")
       .select("id")
       .eq("id", id)
-      .eq("user_id", session.sub)
+      
       .maybeSingle();
 
     if (instanceError) {

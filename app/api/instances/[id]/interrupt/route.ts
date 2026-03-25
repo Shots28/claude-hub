@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       .from("instances")
       .select("id, status")
       .eq("id", id)
-      .eq("user_id", session.sub)
+      
       .maybeSingle();
 
     if (!instance) {

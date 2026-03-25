@@ -41,6 +41,8 @@ export function useRealtime(): RealtimeState {
   >([]);
   const [connected, setConnected] = useState(false);
   const supabaseRef = useRef(createBrowserClient());
+  const activeInstanceRef = useRef<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // -- Fetch all instances on mount --
   const refreshInstances = useCallback(async () => {
@@ -57,6 +59,7 @@ export function useRealtime(): RealtimeState {
 
   // -- Load messages for a specific instance --
   const loadMessages = useCallback(async (instanceId: string) => {
+    activeInstanceRef.current = instanceId; // Track for polling fallback
     try {
       const res = await fetch(`/api/instances/${instanceId}/messages`, {
         credentials: "include",
@@ -70,13 +73,76 @@ export function useRealtime(): RealtimeState {
     }
   }, []);
 
+  // -- Polling fallback: poll for updates when streaming (Realtime backup) --
+  useEffect(() => {
+    // Check if there's a streaming message
+    const hasStreamingMsg = messages.some(
+      (m) => m.role === "assistant" && m.status === "streaming"
+    );
+
+    // Clear existing poll interval
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    // Start polling if streaming and we have an active instance
+    if (hasStreamingMsg && activeInstanceRef.current) {
+      console.log("[realtime] Starting polling fallback for streaming message");
+      const instanceId = activeInstanceRef.current;
+
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/instances/${instanceId}/messages`, {
+            credentials: "include",
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const fetchedMsgs = data.messages ?? [];
+            setMessages((prev) => {
+              // Merge fetched messages with existing ones
+              const merged = [...prev];
+              for (const msg of fetchedMsgs) {
+                const idx = merged.findIndex((m) => m.id === msg.id);
+                if (idx >= 0) {
+                  // Update existing message if content changed
+                  if (merged[idx].content !== msg.content || merged[idx].status !== msg.status) {
+                    merged[idx] = msg;
+                  }
+                } else if (!msg.id.startsWith("optimistic-")) {
+                  merged.push(msg);
+                }
+              }
+              return merged;
+            });
+          }
+        } catch {
+          // silently fail polling
+        }
+      }, 500); // Poll every 500ms during streaming
+    }
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [messages]);
+
+  // -- Track active instance for polling fallback --
+  const activeInstanceRef = useRef<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // -- Subscribe to Realtime channels --
   useEffect(() => {
     const sb = supabaseRef.current;
 
     // Messages channel — subscribe to chat_messages (the realtime relay table)
     const messagesChannel = sb
-      .channel("chat-messages-changes")
+      .channel("chat-messages-changes", {
+        config: { broadcast: { self: true } },
+      })
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages" },
@@ -102,7 +168,10 @@ export function useRealtime(): RealtimeState {
         },
       )
       .subscribe((status, err) => {
-        console.log("[realtime] Messages channel:", status, err || "");
+        if (err) {
+          console.error("[realtime] Messages channel error:", err);
+        }
+        console.log("[realtime] Messages channel:", status);
         setConnected(status === "SUBSCRIBED");
       });
 

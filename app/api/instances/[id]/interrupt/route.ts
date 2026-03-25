@@ -18,12 +18,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
   const { id } = await context.params;
 
   try {
-    // Verify ownership
-    const { data: instance } = await supabase
-      .from("instances")
+    // Verify instance exists (single-user: no ownership check)
+    const { data: instance } = await (supabase.from("instances") as any)
       .select("id, status")
       .eq("id", id)
-      
       .maybeSingle();
 
     if (!instance) {
@@ -33,30 +31,27 @@ export async function POST(req: NextRequest, context: RouteContext) {
       );
     }
 
-    if (instance.status !== "running") {
+    if (instance.status !== "running" && instance.status !== "queued") {
       return NextResponse.json(
         { error: "Instance is not running" },
         { status: 409 },
       );
     }
 
-    // Mark as interrupted — the server-side instance manager picks this up
-    await supabase
-      .from("instances")
+    // Mark as idle
+    await (supabase.from("instances") as any)
       .update({
         status: "idle",
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
 
-    // Insert a system message noting the interruption
-    await supabase.from("messages").insert({
+    // Insert a system message noting the interruption (into chat_messages)
+    await (supabase.from("chat_messages") as any).insert({
       instance_id: id,
       role: "system",
       content: "Instance was interrupted by user.",
-      tool_name: null,
-      tool_id: null,
-      is_error: false,
+      status: "done",
     });
 
     return NextResponse.json({ ok: true }, { status: 200 });

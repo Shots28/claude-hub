@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getSessionFromCookies } from "@/lib/auth";
-import { randomUUID } from "node:crypto";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -15,13 +14,11 @@ async function authenticate(req: NextRequest) {
   return getSessionFromCookies(cookieHeader);
 }
 
-// Verify instance belongs to user
-async function verifyOwnership(instanceId: string, userId: string) {
-  const { data } = await supabase
-    .from("instances")
+// Verify instance exists (single-user: no ownership check)
+async function verifyInstance(instanceId: string) {
+  const { data } = await (supabase.from("instances") as any)
     .select("id")
     .eq("id", instanceId)
-    
     .maybeSingle();
   return !!data;
 }
@@ -36,7 +33,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
-  if (!(await verifyOwnership(id, session.sub))) {
+  if (!(await verifyInstance(id))) {
     return NextResponse.json(
       { error: "Instance not found" },
       { status: 404 },
@@ -44,9 +41,9 @@ export async function GET(req: NextRequest, context: RouteContext) {
   }
 
   try {
-    // Fetch the last 100 messages
+    // Fetch from chat_messages (the realtime table, not the cache)
     const { data, error } = await supabase
-      .from("messages")
+      .from("chat_messages")
       .select("*")
       .eq("instance_id", id)
       .order("created_at", { ascending: true })
@@ -80,7 +77,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
-  if (!(await verifyOwnership(id, session.sub))) {
+  if (!(await verifyInstance(id))) {
     return NextResponse.json(
       { error: "Instance not found" },
       { status: 404 },
@@ -89,27 +86,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   try {
     const body = await req.json();
-    const { content } = body as { content?: string };
+    // Accept both "text" and "content" field names
+    const content = (body.text || body.content || "").trim();
 
-    if (!content?.trim()) {
+    if (!content) {
       return NextResponse.json(
-        { error: "content is required" },
+        { error: "text or content is required" },
         { status: 400 },
       );
     }
 
-    const messageId = randomUUID();
-
-    const { data, error } = await supabase
-      .from("messages")
+    // Insert into chat_messages (the realtime table)
+    const { data, error } = await (supabase.from("chat_messages") as any)
       .insert({
-        id: messageId,
         instance_id: id,
         role: "user",
-        content: content.trim(),
-        tool_name: null,
-        tool_id: null,
-        is_error: false,
+        content,
+        status: "done",
       })
       .select()
       .single();
@@ -122,13 +115,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
       );
     }
 
-    // Update the instance's last message preview and activity
-    await supabase
-      .from("instances")
+    // Update instance status to indicate activity
+    await (supabase.from("instances") as any)
       .update({
-        last_message_preview: content.trim().slice(0, 100),
-        last_activity_at: new Date().toISOString(),
         status: "queued",
+        updated_at: new Date().toISOString(),
       })
       .eq("id", id);
 

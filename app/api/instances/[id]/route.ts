@@ -31,8 +31,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
   const { id } = await context.params;
 
   try {
-    const { data, error } = await supabase
-      .from("instances")
+    const { data, error } = await (supabase
+      .from("instances") as any)
       .select("*")
       .eq("id", id)
       /* single-user: no user_id filter */
@@ -98,8 +98,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     updates.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from("instances")
+    const { data, error } = await (supabase
+      .from("instances") as any)
       .update(updates)
       .eq("id", id)
       /* single-user: no user_id filter */
@@ -143,8 +143,8 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
 
   try {
     // Verify ownership first
-    const { data: existing, error: fetchError } = await supabase
-      .from("instances")
+    const { data: existing, error: fetchError } = await (supabase
+      .from("instances") as any)
       .select("id")
       .eq("id", id)
       /* single-user: no user_id filter */
@@ -165,8 +165,8 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       );
     }
 
-    const { error: deleteError } = await supabase
-      .from("instances")
+    const { error: deleteError } = await (supabase
+      .from("instances") as any)
       .delete()
       .eq("id", id)
       /* single-user: no user_id filter */;

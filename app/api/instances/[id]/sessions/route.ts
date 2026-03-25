@@ -27,11 +27,10 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
   try {
     // Verify the instance belongs to this user
-    const { data: instance, error: instanceError } = await supabase
-      .from("instances")
+    const { data: instance, error: instanceError } = await (supabase
+      .from("instances") as any)
       .select("id")
       .eq("id", id)
-      
       .maybeSingle();
 
     if (instanceError) {

@@ -3,7 +3,7 @@
 // InstanceListMobile — Mobile-optimized instance list (slide-up panel)
 // ---------------------------------------------------------------------------
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { StatusBadge } from "./status-badge";
 import { CreateInstanceModal } from "./create-instance-modal";
@@ -17,6 +17,64 @@ interface InstanceListMobileProps {
   onRefresh: () => void;
 }
 
+function MobileActionMenu({
+  instanceId,
+  onDelete,
+  onRename,
+  onClose,
+}: {
+  instanceId: string;
+  onDelete: (id: string) => void;
+  onRename: (id: string) => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-2 top-full mt-1 z-[60] w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRename(instanceId);
+          onClose();
+        }}
+        className="w-full text-left px-3 py-2 text-sm text-hub-text hover:bg-hub-surface transition-colors"
+      >
+        Rename
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (confirm("Delete this instance? This cannot be undone.")) {
+            onDelete(instanceId);
+          }
+          onClose();
+        }}
+        className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
 export function InstanceListMobile({
   instances,
   activeId,
@@ -26,6 +84,53 @@ export function InstanceListMobile({
 }: InstanceListMobileProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/instances/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleRename = (id: string) => {
+    const inst = instances.find((i) => i.id === id);
+    if (inst) {
+      setRenamingId(id);
+      setRenameValue(inst.name);
+    }
+  };
+
+  const submitRename = async (id: string) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenamingId(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch {
+      // silently fail
+    }
+    setRenamingId(null);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+  };
 
   const filteredInstances = useMemo(() => {
     if (!search.trim()) return instances;
@@ -115,37 +220,85 @@ export function InstanceListMobile({
                 {insts.map((inst) => {
                   const isActive = inst.id === activeId;
                   return (
-                    <Link
-                      key={inst.id}
-                      href={`/instances/${inst.id}`}
-                      onClick={onClose}
-                      className={`flex items-center gap-3 mx-2 mb-0.5 rounded-xl px-4 py-3 transition-colors ${
-                        isActive
-                          ? "bg-hub-accent/10"
-                          : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
-                      }`}
-                    >
-                      <StatusBadge
-                        status={inst.status as InstanceStatus}
-                        size="md"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div
-                          className={`text-sm font-medium truncate ${
-                            isActive
-                              ? "text-hub-text"
-                              : "text-hub-text-muted"
-                          }`}
-                        >
-                          {inst.name}
+                    <div key={inst.id} className="relative mx-2 mb-0.5">
+                      <Link
+                        href={`/instances/${inst.id}`}
+                        onClick={onClose}
+                        className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-colors ${
+                          isActive
+                            ? "bg-hub-accent/10"
+                            : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
+                        }`}
+                      >
+                        <StatusBadge
+                          status={inst.status as InstanceStatus}
+                          size="md"
+                        />
+                        <div className="min-w-0 flex-1">
+                          {renamingId === inst.id ? (
+                            <input
+                              type="text"
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  submitRename(inst.id);
+                                } else if (e.key === "Escape") {
+                                  cancelRename();
+                                }
+                              }}
+                              onBlur={() => submitRename(inst.id)}
+                              onClick={(e) => e.preventDefault()}
+                              autoFocus
+                              className="text-sm font-medium truncate w-full bg-hub-surface-2 border border-hub-accent/50 rounded px-1.5 py-0.5 text-hub-text focus:outline-none focus:ring-1 focus:ring-hub-accent/50"
+                            />
+                          ) : (
+                            <div
+                              className={`text-sm font-medium truncate ${
+                                isActive
+                                  ? "text-hub-text"
+                                  : "text-hub-text-muted"
+                              }`}
+                            >
+                              {inst.name}
+                            </div>
+                          )}
+                          {inst.last_message_preview && (
+                            <p className="text-xs text-hub-text-muted/60 truncate mt-0.5">
+                              {inst.last_message_preview}
+                            </p>
+                          )}
                         </div>
-                        {inst.last_message_preview && (
-                          <p className="text-xs text-hub-text-muted/60 truncate mt-0.5">
-                            {inst.last_message_preview}
-                          </p>
-                        )}
-                      </div>
-                    </Link>
+
+                        {/* More actions button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
+                          }}
+                          className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
+                          aria-label="Instance options"
+                        >
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="5" r="2" />
+                            <circle cx="12" cy="12" r="2" />
+                            <circle cx="12" cy="19" r="2" />
+                          </svg>
+                        </button>
+                      </Link>
+
+                      {menuOpenId === inst.id && (
+                        <MobileActionMenu
+                          instanceId={inst.id}
+                          onDelete={handleDelete}
+                          onRename={handleRename}
+                          onClose={() => setMenuOpenId(null)}
+                        />
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -157,9 +310,10 @@ export function InstanceListMobile({
       <CreateInstanceModal
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={() => {
+        onCreated={(instanceId) => {
           onRefresh();
           onClose();
+          window.location.href = `/instances/${instanceId}`;
         }}
         existingNames={instances.map((i) => i.name)}
       />

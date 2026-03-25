@@ -292,7 +292,10 @@ export function InstanceSidebar({
       <CreateInstanceModal
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={onRefresh}
+        onCreated={(instanceId) => {
+          onRefresh();
+          window.location.href = `/instances/${instanceId}`;
+        }}
         existingNames={instances.map((i) => i.name)}
       />
     </>

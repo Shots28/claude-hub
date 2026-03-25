@@ -10,7 +10,7 @@ import type { PermissionMode } from "@/lib/types";
 interface CreateInstanceModalProps {
   open: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (instanceId: string) => void;
   existingNames?: string[];
 }
 
@@ -122,6 +122,8 @@ export function CreateInstanceModal({
           return;
         }
 
+        const data = await res.json();
+
         // Reset form
         setName("");
         setRepoPath("");
@@ -130,7 +132,7 @@ export function CreateInstanceModal({
         setExtendedThinking(false);
         setSearchQuery("");
         setShowManual(false);
-        onCreated();
+        onCreated(data.instance.id);
         onClose();
       } catch {
         setError("Network error. Please try again.");

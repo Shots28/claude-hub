@@ -71,6 +71,11 @@ export class InstanceManager extends EventEmitter {
     this.semaphore = new Semaphore(maxConcurrent);
     this.idleTimeoutMs =
       parseInt(process.env.IDLE_TIMEOUT_MINUTES || "30") * 60 * 1000;
+
+    // Prevent unhandled error events from crashing the process
+    this.on("error", (instanceId: string, data: any) => {
+      console.error(`[InstanceManager] Error event for ${instanceId}:`, data?.message || data);
+    });
   }
 
   async getInstances(): Promise<DbInstance[]> {
@@ -220,14 +225,7 @@ export class InstanceManager extends EventEmitter {
     this.activeQueries.set(instanceId, controller);
     await this.updateStatus(instanceId, "running");
 
-    // Store user message in chat_messages
-    await this.supabase.from("chat_messages").insert({
-      instance_id: instanceId,
-      role: "user",
-      content: message,
-      status: "done",
-    });
-
+    // User message already inserted by the API route — just create assistant placeholder
     // Create assistant message placeholder
     const { data: assistantMsg } = await this.supabase
       .from("chat_messages")
@@ -265,8 +263,7 @@ export class InstanceManager extends EventEmitter {
         ? JSON.parse(rawTools || "[]")
         : [];
 
-      const options: any = {
-        prompt: message,
+      const queryOptions: any = {
         cwd: instance.repo_path,
         includePartialMessages: true,
         allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
@@ -275,14 +272,9 @@ export class InstanceManager extends EventEmitter {
           : "default",
       };
 
-      // Resume session if we have one
-      if (instance.current_session_id) {
-        options.resume = instance.current_session_id;
-      }
-
       // Permission callback
       if (instance.permission_mode === "default") {
-        options.canUseTool = async (
+        queryOptions.canUseTool = async (
           toolName: string,
           toolInput: unknown
         ): Promise<any> => {
@@ -294,7 +286,37 @@ export class InstanceManager extends EventEmitter {
         };
       }
 
-      for await (const event of query(options)) {
+      // Try to resume session; if it fails, retry without resume
+      let queryIterable: AsyncIterable<any>;
+      if (instance.current_session_id) {
+        try {
+          const resumeOpts = { ...queryOptions, resume: instance.current_session_id };
+          queryIterable = query({ prompt: message, options: resumeOpts });
+          // Test if the iterable works by getting the first event
+          const iter = queryIterable[Symbol.asyncIterator]();
+          const first = await iter.next();
+          // Wrap remaining iteration
+          queryIterable = (async function* () {
+            if (!first.done) yield first.value;
+            while (true) {
+              const next = await iter.next();
+              if (next.done) break;
+              yield next.value;
+            }
+          })();
+        } catch {
+          console.log(`[InstanceManager] Resume failed for ${instanceId}, starting fresh`);
+          await this.supabase
+            .from("instances")
+            .update({ current_session_id: null })
+            .eq("id", instanceId);
+          queryIterable = query({ prompt: message, options: queryOptions });
+        }
+      } else {
+        queryIterable = query({ prompt: message, options: queryOptions });
+      }
+
+      for await (const event of queryIterable) {
         if (controller.signal.aborted) break;
 
         // Handle different event types

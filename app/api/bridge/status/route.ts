@@ -40,9 +40,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ online: false, lastHeartbeat: null });
     }
 
-    const { last_heartbeat_at } = rows[0];
+    const { last_heartbeat_at, status } = rows[0];
     const age = Date.now() - new Date(last_heartbeat_at).getTime();
-    const online = age < 60_000; // Online if heartbeat < 60s old
+    // Online if status column is 'online' AND heartbeat is recent (< 60s)
+    const online = status === "online" && age < 60_000;
 
     return NextResponse.json({
       online,

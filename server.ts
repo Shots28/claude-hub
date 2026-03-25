@@ -325,10 +325,10 @@ async function initBridge(
         .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
     } catch {}
   }, 15_000);
-  // Write initial heartbeat immediately
+  // Write initial heartbeat immediately (guarantees row exists)
   try {
     await bridgeSupabase
-      .from("discovered_repos")
+      .from("bridge_status")
       .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
   } catch {}
 
@@ -338,6 +338,14 @@ async function initBridge(
     clearInterval(pollInterval);
     clearInterval(heartbeatInterval);
     if (refreshTimer) clearTimeout(refreshTimer);
+
+    // Mark bridge as offline immediately so UI reflects shutdown
+    try {
+      await bridgeSupabase
+        .from("bridge_status")
+        .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "offline" });
+    } catch {}
+
     await bridgeSupabase.removeAllChannels();
     await manager.shutdown();
     server.close(() => {

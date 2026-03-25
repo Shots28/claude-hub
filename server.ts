@@ -1,12 +1,15 @@
 // ---------------------------------------------------------------------------
-// Claude Hub — Custom HTTP + WebSocket Server
-// Run with: tsx server.ts (dev) or tsx server.ts (prod with NODE_ENV=production)
+// Claude Hub — Local Bridge Server
+// Serves Next.js UI locally + bridges phone messages to Claude Code execution
+// Run: set -a && source .env.local && set +a && node server.ts
 // ---------------------------------------------------------------------------
 
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import next from "next";
 import { parse } from "url";
-import { WebSocketServer, type WebSocket } from "ws";
+import { readdir, access } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -23,69 +26,275 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 // ---------------------------------------------------------------------------
-// Cookie parser — splits on FIRST "=" only so base64 values aren't corrupted
+// Repo Scanner
 // ---------------------------------------------------------------------------
 
-function parseCookies(cookieHeader: string): Record<string, string> {
-  const cookies: Record<string, string> = {};
-  for (const pair of cookieHeader.split(";")) {
-    const trimmed = pair.trim();
-    const eqIndex = trimmed.indexOf("=");
-    if (eqIndex === -1) continue;
-    const name = trimmed.slice(0, eqIndex).trim();
-    const value = trimmed.slice(eqIndex + 1).trim();
-    if (name) cookies[name] = value;
+const SCAN_DIRS = [
+  "~/Projects", "~/projects", "~/Developer", "~/developer",
+  "~/Development", "~/dev", "~/Dev", "~/repos", "~/Repos",
+  "~/code", "~/Code", "~/src", "~/workspace", "~/Workspace",
+  "~/work", "~/Work", "~/git", "~/GitHub", "~/github",
+  "~/Desktop", "~/Documents", "~",
+];
+
+function expandHome(p: string): string {
+  const home = homedir();
+  if (p.startsWith("~/")) return join(home, p.slice(2));
+  if (p === "~") return home;
+  return p;
+}
+
+async function scanRepos(): Promise<{ name: string; path: string }[]> {
+  const seen = new Set<string>();
+  const repos: { name: string; path: string }[] = [];
+
+  for (const dir of SCAN_DIRS) {
+    const expanded = expandHome(dir);
+    try {
+      const entries = await readdir(expanded, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith(".")) continue;
+        const fullPath = join(expanded, e.name);
+        try {
+          await access(join(fullPath, ".git"));
+          if (!seen.has(fullPath)) {
+            seen.add(fullPath);
+            repos.push({ name: e.name, path: fullPath });
+          }
+        } catch {}
+      }
+    } catch {}
   }
-  return cookies;
+
+  repos.sort((a, b) => a.name.localeCompare(b.name));
+  return repos;
+}
+
+async function syncReposToSupabase(repos: { name: string; path: string }[]): Promise<void> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) return;
+
+  const restBase = `${supabaseUrl}/rest/v1/discovered_repos`;
+  const headers = {
+    apikey: supabaseKey,
+    Authorization: `Bearer ${supabaseKey}`,
+    "Content-Type": "application/json",
+    Prefer: "return=minimal",
+  };
+
+  await fetch(`${restBase}?path=neq.`, { method: "DELETE", headers });
+
+  if (repos.length > 0) {
+    const res = await fetch(restBase, {
+      method: "POST",
+      headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(repos),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[repo-scanner] Sync failed:", text);
+    } else {
+      console.log(`[repo-scanner] Synced ${repos.length} repos to Supabase`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
-// JWT validation — lightweight check using jose
+// Bridge — connects Supabase Realtime to local Claude Code execution
 // ---------------------------------------------------------------------------
 
-async function validateJwt(token: string): Promise<{ sub: string } | null> {
-  try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      console.error("[ws] JWT_SECRET is not configured");
-      return null;
+async function initBridge(
+  server: ReturnType<typeof createServer>,
+  repos: { name: string; path: string }[]
+) {
+  // --- Env validation ---
+  const REQUIRED_ENV = ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "JWT_SECRET"];
+  const envMissing = REQUIRED_ENV.filter((k) => !process.env[k]);
+  if (envMissing.length > 0) {
+    console.error(`[bridge] Missing env vars: ${envMissing.join(", ")}`);
+    console.error("[bridge] Run: set -a && source .env.local && set +a && node server.ts");
+    process.exit(1);
+  }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn("[bridge] ANTHROPIC_API_KEY not set — SDK will use mock mode");
+  }
+
+  // --- Import and instantiate InstanceManager ---
+  // @ts-ignore — Node 22 native TS needs .ts extension, TS compiler disagrees
+  const { InstanceManager } = await import("./lib/instance-manager.ts");
+  const manager = new InstanceManager();
+
+  const { createClient } = await import("@supabase/supabase-js");
+  const bridgeSupabase: any = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  // --- Build local instance ownership cache ---
+  const localRepoPaths = new Set(repos.map((r) => r.path));
+  const localInstanceIds = new Set<string>();
+
+  let refreshTimer: NodeJS.Timeout | null = null;
+
+  async function refreshLocalInstanceCache() {
+    const { data: instances } = await bridgeSupabase
+      .from("instances")
+      .select("id, repo_path");
+    localInstanceIds.clear();
+    for (const inst of instances || []) {
+      if (localRepoPaths.has(inst.repo_path)) {
+        localInstanceIds.add(inst.id);
+      }
     }
+    console.log(`[bridge] Cached ${localInstanceIds.size} local instance IDs`);
+  }
 
-    // Dynamic import to keep top-level synchronous
-    const { jwtVerify } = await import("jose");
-    const encoder = new TextEncoder();
-    const { payload } = await jwtVerify(token, encoder.encode(secret));
+  function debouncedRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshLocalInstanceCache().catch(console.error);
+    }, 5000);
+  }
 
-    if (typeof payload.sub !== "string" || !payload.sub) {
-      return null;
+  await refreshLocalInstanceCache();
+
+  // Refresh cache when instances are created or deleted
+  bridgeSupabase
+    .channel("bridge-instances")
+    .on("postgres_changes", {
+      event: "INSERT",
+      schema: "public",
+      table: "instances",
+    }, debouncedRefresh)
+    .on("postgres_changes", {
+      event: "DELETE",
+      schema: "public",
+      table: "instances",
+    }, debouncedRefresh)
+    .subscribe();
+
+  // --- Reset stale "running" instances (scoped to local repos) ---
+  if (localInstanceIds.size > 0) {
+    const { data: stale } = await bridgeSupabase
+      .from("instances")
+      .select("id")
+      .eq("status", "running")
+      .in("id", Array.from(localInstanceIds));
+
+    if (stale?.length) {
+      await bridgeSupabase
+        .from("instances")
+        .update({ status: "queued", updated_at: new Date().toISOString() })
+        .in("id", stale.map((s: any) => s.id));
+      console.log(`[bridge] Reset ${stale.length} stale running instances to queued`);
     }
-
-    return { sub: payload.sub };
-  } catch (err) {
-    console.error("[ws] JWT validation failed:", (err as Error).message);
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Extract token from request — checks Authorization header, then cookies
-// ---------------------------------------------------------------------------
-
-function extractToken(req: IncomingMessage): string | null {
-  // 1. Authorization: Bearer <token>
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
   }
 
-  // 2. Cookie: token=<jwt>
-  const cookieHeader = req.headers.cookie;
-  if (cookieHeader) {
-    const cookies = parseCookies(cookieHeader);
-    if (cookies.token) return cookies.token;
+  // --- Supabase Realtime subscription (primary trigger) ---
+  const channel = bridgeSupabase
+    .channel("bridge-messages")
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "chat_messages",
+        filter: "role=eq.user",
+      },
+      async (payload: any) => {
+        const { instance_id: instanceId, content } = payload.new;
+        if (!instanceId || !content) return;
+
+        // Only process local instances (cached, no DB call)
+        if (!localInstanceIds.has(instanceId)) return;
+
+        // Skip if already running
+        if (manager.isRunning(instanceId)) {
+          console.log(`[bridge] Instance ${instanceId} busy, skipping`);
+          return;
+        }
+
+        console.log(`[bridge] Executing message for instance ${instanceId}`);
+        try {
+          await manager.sendMessage(instanceId, content);
+        } catch (err) {
+          console.error(`[bridge] Execution failed for ${instanceId}:`, err);
+          try {
+            await bridgeSupabase
+              .from("instances")
+              .update({
+                status: "error",
+                error_message: (err as Error).message,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", instanceId);
+          } catch (dbErr) {
+            console.error("[bridge] Failed to update error status:", dbErr);
+          }
+        }
+      }
+    )
+    .subscribe((status: string) => {
+      console.log(`[bridge] Realtime subscription: ${status}`);
+    });
+
+  // --- Periodic poll fallback (every 30s) ---
+  const pollInterval = setInterval(async () => {
+    try {
+      if (localInstanceIds.size === 0) return;
+
+      const { data: queued } = await bridgeSupabase
+        .from("instances")
+        .select("id")
+        .eq("status", "queued")
+        .in("id", Array.from(localInstanceIds));
+
+      if (!queued?.length) return;
+
+      for (const inst of queued) {
+        if (manager.isRunning(inst.id)) continue;
+
+        const { data: latest } = await bridgeSupabase
+          .from("chat_messages")
+          .select("role, content")
+          .eq("instance_id", inst.id)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (latest?.[0]?.role === "user") {
+          console.log(`[bridge-poll] Processing queued instance ${inst.id}`);
+          manager.sendMessage(inst.id, latest[0].content).catch((err: any) => {
+            console.error(`[bridge-poll] Failed for ${inst.id}:`, err);
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[bridge-poll] Error:", err);
+    }
+  }, 30_000);
+
+  // --- Graceful shutdown ---
+  async function shutdown(signal: string) {
+    console.log(`\n[server] Received ${signal}, shutting down...`);
+    clearInterval(pollInterval);
+    if (refreshTimer) clearTimeout(refreshTimer);
+    await bridgeSupabase.removeAllChannels();
+    await manager.shutdown();
+    server.close(() => {
+      console.log("[server] Server closed");
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.error("[server] Forced exit");
+      process.exit(1);
+    }, 30_000).unref();
   }
 
-  return null;
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+
+  console.log("[bridge] Ready — listening for messages");
 }
 
 // ---------------------------------------------------------------------------
@@ -93,115 +302,28 @@ function extractToken(req: IncomingMessage): string | null {
 // ---------------------------------------------------------------------------
 
 app.prepare().then(() => {
-  // -- HTTP server ----------------------------------------------------------
-
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const parsedUrl = parse(req.url || "/", true);
     handle(req, res, parsedUrl);
   });
 
-  // -- WebSocket server (no auto-attach — we handle upgrade manually) -------
-
-  const wss = new WebSocketServer({ noServer: true });
-
-  // -- Upgrade handler: authenticate BEFORE accepting the connection --------
-
-  server.on("upgrade", async (req, socket, head) => {
-    const { pathname } = parse(req.url || "/", true);
-
-    // Only accept WebSocket upgrades on /ws
-    if (pathname !== "/ws") {
-      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-      socket.destroy();
-      return;
-    }
-
-    // Validate JWT before upgrading
-    const token = extractToken(req);
-    if (!token) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nMissing auth token\n");
-      socket.destroy();
-      return;
-    }
-
-    const claims = await validateJwt(token);
-    if (!claims) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nInvalid auth token\n");
-      socket.destroy();
-      return;
-    }
-
-    // Auth passed — complete the WebSocket handshake
-    wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
-      // Attach user info to the socket for downstream handlers
-      (ws as WebSocket & { userId?: string }).userId = claims.sub;
-      wss.emit("connection", ws, req);
-    });
-  });
-
-  // -- WebSocket connection handler -----------------------------------------
-
-  wss.on("connection", (ws: WebSocket, _req: IncomingMessage) => {
-    const userId = (ws as WebSocket & { userId?: string }).userId;
-    console.log(`[ws] Client connected (user: ${userId})`);
-
-    ws.on("message", (data) => {
-      try {
-        const message = JSON.parse(data.toString());
-        // Instance manager and ws-server will handle routing.
-        // For now, echo back to confirm connectivity.
-        console.log(`[ws] Message from ${userId}:`, message.type);
-      } catch {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
-      }
-    });
-
-    ws.on("close", () => {
-      console.log(`[ws] Client disconnected (user: ${userId})`);
-    });
-
-    ws.on("error", (err) => {
-      console.error(`[ws] Socket error (user: ${userId}):`, err.message);
-    });
-
-    // Send initial sync on connect
-    ws.send(JSON.stringify({ type: "connected", userId }));
-  });
-
-  // -- Graceful shutdown ----------------------------------------------------
-
-  function shutdown(signal: string) {
-    console.log(`\n[server] Received ${signal}, shutting down gracefully...`);
-
-    // Close all WebSocket connections
-    wss.clients.forEach((client) => {
-      client.close(1001, "Server shutting down");
-    });
-
-    wss.close(() => {
-      console.log("[server] WebSocket server closed");
-    });
-
-    server.close(() => {
-      console.log("[server] HTTP server closed");
-      process.exit(0);
-    });
-
-    // Force exit after 10s if graceful shutdown stalls
-    setTimeout(() => {
-      console.error("[server] Forced exit after timeout");
-      process.exit(1);
-    }, 10_000).unref();
-  }
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
-
-  // -- Start listening ------------------------------------------------------
-
   server.listen(port, () => {
     console.log(
       `[server] Claude Hub running on http://localhost:${port} (${dev ? "development" : "production"})`
     );
+
+    // Scan repos, sync to Supabase, then start bridge
+    (async () => {
+      try {
+        const repos = await scanRepos();
+        console.log(`[repo-scanner] Found ${repos.length} local repos`);
+
+        await syncReposToSupabase(repos);
+        await initBridge(server, repos);
+      } catch (err) {
+        console.error("[startup] Fatal error:", err);
+        process.exit(1);
+      }
+    })();
   });
 });

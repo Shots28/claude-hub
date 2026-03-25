@@ -33,6 +33,16 @@ export function InstanceListMobile({
     return instances.filter((inst) => inst.name.toLowerCase().includes(q));
   }, [instances, search]);
 
+  const groupedInstances = useMemo(() => {
+    const groups = new Map<string, typeof filteredInstances>();
+    for (const inst of filteredInstances) {
+      const key = inst.repo_path;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(inst);
+    }
+    return groups;
+  }, [filteredInstances]);
+
   if (!open) return null;
 
   return (
@@ -97,42 +107,49 @@ export function InstanceListMobile({
               </p>
             </div>
           ) : (
-            filteredInstances.map((inst) => {
-              const isActive = inst.id === activeId;
-              return (
-                <Link
-                  key={inst.id}
-                  href={`/instances/${inst.id}`}
-                  onClick={onClose}
-                  className={`flex items-center gap-3 mx-2 mb-0.5 rounded-xl px-4 py-3 transition-colors ${
-                    isActive
-                      ? "bg-hub-accent/10"
-                      : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
-                  }`}
-                >
-                  <StatusBadge
-                    status={inst.status as InstanceStatus}
-                    size="md"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className={`text-sm font-medium truncate ${
+            Array.from(groupedInstances.entries()).map(([repoPath, insts]) => (
+              <div key={repoPath}>
+                <div className="px-4 py-1.5 text-[10px] font-medium text-hub-text-muted/60 uppercase tracking-wider">
+                  {repoPath.split("/").pop()}
+                </div>
+                {insts.map((inst) => {
+                  const isActive = inst.id === activeId;
+                  return (
+                    <Link
+                      key={inst.id}
+                      href={`/instances/${inst.id}`}
+                      onClick={onClose}
+                      className={`flex items-center gap-3 mx-2 mb-0.5 rounded-xl px-4 py-3 transition-colors ${
                         isActive
-                          ? "text-hub-text"
-                          : "text-hub-text-muted"
+                          ? "bg-hub-accent/10"
+                          : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
                       }`}
                     >
-                      {inst.name}
-                    </div>
-                    {inst.last_message_preview && (
-                      <p className="text-xs text-hub-text-muted/60 truncate mt-0.5">
-                        {inst.last_message_preview}
-                      </p>
-                    )}
-                  </div>
-                </Link>
-              );
-            })
+                      <StatusBadge
+                        status={inst.status as InstanceStatus}
+                        size="md"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`text-sm font-medium truncate ${
+                            isActive
+                              ? "text-hub-text"
+                              : "text-hub-text-muted"
+                          }`}
+                        >
+                          {inst.name}
+                        </div>
+                        {inst.last_message_preview && (
+                          <p className="text-xs text-hub-text-muted/60 truncate mt-0.5">
+                            {inst.last_message_preview}
+                          </p>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            ))
           )}
         </nav>
       </div>
@@ -144,6 +161,7 @@ export function InstanceListMobile({
           onRefresh();
           onClose();
         }}
+        existingNames={instances.map((i) => i.name)}
       />
     </>
   );

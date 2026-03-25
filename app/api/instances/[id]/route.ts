@@ -75,11 +75,12 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
   try {
     const body = await req.json();
-    const { name, permissionMode, allowedTools, sortOrder } = body as {
+    const { name, permissionMode, allowedTools, sortOrder, current_session_id } = body as {
       name?: string;
       permissionMode?: PermissionMode;
       allowedTools?: string[];
       sortOrder?: number;
+      current_session_id?: string | null;
     };
 
     // Build update payload — only include provided fields
@@ -88,6 +89,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (permissionMode !== undefined) updates.permission_mode = permissionMode;
     if (allowedTools !== undefined) updates.allowed_tools = allowedTools;
     if (sortOrder !== undefined) updates.sort_order = sortOrder;
+    if ("current_session_id" in body) updates.current_session_id = current_session_id ?? null;
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(

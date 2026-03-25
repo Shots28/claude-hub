@@ -166,6 +166,9 @@ export function ChatView({
                 showLabel
                 errorMessage={instance.error_message || undefined}
               />
+              <span className="text-xs text-hub-text-muted ml-2">
+                {instance.model || "sonnet"}
+              </span>
             </div>
             <p className="text-xs text-hub-text-muted truncate mt-0.5">
               {instance.repo_path}

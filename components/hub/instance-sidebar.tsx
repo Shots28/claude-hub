@@ -19,10 +19,12 @@ interface InstanceSidebarProps {
 function InstanceContextMenu({
   instanceId,
   onDelete,
+  onRename,
   onClose,
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
+  onRename: (id: string) => void;
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -42,6 +44,18 @@ function InstanceContextMenu({
       ref={menuRef}
       className="absolute right-0 top-full mt-1 z-50 w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
     >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRename(instanceId);
+          onClose();
+        }}
+        className="w-full text-left px-3 py-1.5 text-xs text-hub-text hover:bg-hub-surface transition-colors"
+      >
+        Rename
+      </button>
       <button
         type="button"
         onClick={(e) => {
@@ -68,12 +82,24 @@ export function InstanceSidebar({
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const filteredInstances = useMemo(() => {
     if (!search.trim()) return instances;
     const q = search.toLowerCase();
     return instances.filter((inst) => inst.name.toLowerCase().includes(q));
   }, [instances, search]);
+
+  const groupedInstances = useMemo(() => {
+    const groups = new Map<string, typeof filteredInstances>();
+    for (const inst of filteredInstances) {
+      const key = inst.repo_path;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(inst);
+    }
+    return groups;
+  }, [filteredInstances]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -84,6 +110,39 @@ export function InstanceSidebar({
     } catch {
       // silently fail
     }
+  };
+
+  const handleRename = (id: string) => {
+    const inst = instances.find((i) => i.id === id);
+    if (inst) {
+      setRenamingId(id);
+      setRenameValue(inst.name);
+    }
+  };
+
+  const submitRename = async (id: string) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setRenamingId(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch {
+      // silently fail
+    }
+    setRenamingId(null);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
   };
 
   return (
@@ -136,65 +195,93 @@ export function InstanceSidebar({
               </p>
             </div>
           ) : (
-            filteredInstances.map((inst) => {
-              const isActive = inst.id === activeId;
-              return (
-                <div key={inst.id} className="relative group mx-2 mb-0.5">
-                  <Link
-                    href={`/instances/${inst.id}`}
-                    className={`block rounded-lg px-3 py-2.5 transition-colors ${
-                      isActive
-                        ? "bg-hub-accent/10 border border-hub-accent/20"
-                        : "hover:bg-hub-surface-2 border border-transparent"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <StatusBadge
-                        status={inst.status as InstanceStatus}
-                      />
-                      <span
-                        className={`text-sm font-medium truncate flex-1 ${
-                          isActive ? "text-hub-text" : "text-hub-text-muted"
+            Array.from(groupedInstances.entries()).map(([repoPath, insts]) => (
+              <div key={repoPath}>
+                <div className="px-4 py-1.5 text-[10px] font-medium text-hub-text-muted/60 uppercase tracking-wider">
+                  {repoPath.split("/").pop()}
+                </div>
+                {insts.map((inst) => {
+                  const isActive = inst.id === activeId;
+                  return (
+                    <div key={inst.id} className="relative group mx-2 mb-0.5">
+                      <Link
+                        href={`/instances/${inst.id}`}
+                        className={`block rounded-lg px-3 py-2.5 transition-colors ${
+                          isActive
+                            ? "bg-hub-accent/10 border border-hub-accent/20"
+                            : "hover:bg-hub-surface-2 border border-transparent"
                         }`}
                       >
-                        {inst.name}
-                      </span>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge
+                            status={inst.status as InstanceStatus}
+                          />
+                          {renamingId === inst.id ? (
+                            <input
+                              type="text"
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  submitRename(inst.id);
+                                } else if (e.key === "Escape") {
+                                  cancelRename();
+                                }
+                              }}
+                              onBlur={() => submitRename(inst.id)}
+                              onClick={(e) => e.preventDefault()}
+                              autoFocus
+                              className="text-sm font-medium truncate flex-1 bg-hub-surface-2 border border-hub-accent/50 rounded px-1.5 py-0.5 text-hub-text focus:outline-none focus:ring-1 focus:ring-hub-accent/50"
+                            />
+                          ) : (
+                            <span
+                              className={`text-sm font-medium truncate flex-1 ${
+                                isActive ? "text-hub-text" : "text-hub-text-muted"
+                              }`}
+                            >
+                              {inst.name}
+                            </span>
+                          )}
+                        </div>
+                        {inst.last_message_preview && (
+                          <p className="text-xs text-hub-text-muted/60 truncate mt-1 pl-3.5">
+                            {inst.last_message_preview}
+                          </p>
+                        )}
+                      </Link>
+
+                      {/* Context menu trigger */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
+                        }}
+                        className="absolute right-2 top-2.5 w-6 h-6 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
+                        aria-label="Instance options"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="5" r="2" />
+                          <circle cx="12" cy="12" r="2" />
+                          <circle cx="12" cy="19" r="2" />
+                        </svg>
+                      </button>
+
+                      {menuOpenId === inst.id && (
+                        <InstanceContextMenu
+                          instanceId={inst.id}
+                          onDelete={handleDelete}
+                          onRename={handleRename}
+                          onClose={() => setMenuOpenId(null)}
+                        />
+                      )}
                     </div>
-                    {inst.last_message_preview && (
-                      <p className="text-xs text-hub-text-muted/60 truncate mt-1 pl-3.5">
-                        {inst.last_message_preview}
-                      </p>
-                    )}
-                  </Link>
-
-                  {/* Context menu trigger */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
-                    }}
-                    className="absolute right-2 top-2.5 w-6 h-6 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
-                    aria-label="Instance options"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                      <circle cx="12" cy="5" r="2" />
-                      <circle cx="12" cy="12" r="2" />
-                      <circle cx="12" cy="19" r="2" />
-                    </svg>
-                  </button>
-
-                  {menuOpenId === inst.id && (
-                    <InstanceContextMenu
-                      instanceId={inst.id}
-                      onDelete={handleDelete}
-                      onClose={() => setMenuOpenId(null)}
-                    />
-                  )}
-                </div>
-              );
-            })
+                  );
+                })}
+              </div>
+            ))
           )}
         </nav>
 
@@ -206,6 +293,7 @@ export function InstanceSidebar({
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={onRefresh}
+        existingNames={instances.map((i) => i.name)}
       />
     </>
   );

@@ -285,9 +285,17 @@ export class InstanceManager extends EventEmitter {
         allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
         permissionMode: ["bypassPermissions", "acceptEdits", "plan", "default"].includes(instance.permission_mode)
           ? instance.permission_mode
+          : instance.permission_mode === "auto" ? "bypassPermissions"
           : "default",
         ...(mcpServers ? { mcpServers } : {}),
       };
+
+      if (instance.model) {
+        queryOptions.model = instance.model;
+      }
+      if (instance.max_thinking_tokens > 0) {
+        queryOptions.maxThinkingTokens = instance.max_thinking_tokens;
+      }
 
       // Permission callback
       if (instance.permission_mode === "default") {

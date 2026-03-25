@@ -62,10 +62,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name, repoPath, permissionMode } = body as {
+    const { name, repoPath, permissionMode, model, extendedThinking } = body as {
       name?: string;
       repoPath?: string;
       permissionMode?: PermissionMode;
+      model?: string;
+      extendedThinking?: boolean;
     };
 
     if (!name || !repoPath) {
@@ -91,6 +93,13 @@ export async function POST(req: NextRequest) {
 
     const id = randomUUID();
 
+    // Validate model value
+    const validModels = ["opus", "sonnet", "haiku"];
+    const instanceModel = model && validModels.includes(model) ? model : "sonnet";
+
+    // Convert extendedThinking toggle to max_thinking_tokens
+    const maxThinkingTokens = extendedThinking ? 10000 : 0;
+
     // Single-user app — no user_id needed
     // allowed_tools is JSONB in Supabase, pass array directly
     const { data, error } = await (supabase
@@ -102,6 +111,8 @@ export async function POST(req: NextRequest) {
         permission_mode: permissionMode ?? "acceptEdits",
         allowed_tools: [],
         status: "stopped",
+        model: instanceModel,
+        max_thinking_tokens: maxThinkingTokens,
       })
       .select()
       .single();

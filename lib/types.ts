@@ -166,6 +166,8 @@ export type DbInstance = {
   error_message: string | null;
   last_message_preview: string | null;
   last_activity_at: string | null;
+  model: string | null;
+  max_thinking_tokens: number;
   created_at: string;
   updated_at: string;
 };
@@ -254,12 +256,14 @@ export interface Database {
       };
       instances: {
         Row: DbInstance;
-        Insert: Omit<DbInstance, "id" | "created_at" | "updated_at" | "sort_order" | "error_message"> & {
+        Insert: Omit<DbInstance, "id" | "created_at" | "updated_at" | "sort_order" | "error_message" | "model" | "max_thinking_tokens"> & {
           id?: string;
           created_at?: string;
           updated_at?: string;
           sort_order?: number | null;
           error_message?: string | null;
+          model?: string | null;
+          max_thinking_tokens?: number;
         };
         Update: Partial<Omit<DbInstance, "id">>;
         Relationships: [

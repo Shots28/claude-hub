@@ -11,6 +11,7 @@ interface CreateInstanceModalProps {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  existingNames?: string[];
 }
 
 interface DiscoveredRepo {
@@ -22,11 +23,14 @@ export function CreateInstanceModal({
   open,
   onClose,
   onCreated,
+  existingNames,
 }: CreateInstanceModalProps) {
   const [name, setName] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [permissionMode, setPermissionMode] =
     useState<PermissionMode>("acceptEdits");
+  const [model, setModel] = useState("sonnet");
+  const [extendedThinking, setExtendedThinking] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +74,14 @@ export function CreateInstanceModal({
   }, [open]);
 
   const selectRepo = (repo: DiscoveredRepo) => {
-    setName(repo.name);
+    let baseName = repo.name;
+    let finalName = baseName;
+    let counter = 2;
+    while (existingNames?.includes(finalName)) {
+      finalName = `${baseName} (${counter})`;
+      counter++;
+    }
+    setName(finalName);
     setRepoPath(repo.path);
     setSearchQuery("");
   };
@@ -100,6 +111,8 @@ export function CreateInstanceModal({
             name: name.trim(),
             repoPath: repoPath.trim(),
             permissionMode,
+            model,
+            extendedThinking,
           }),
         });
 
@@ -113,6 +126,8 @@ export function CreateInstanceModal({
         setName("");
         setRepoPath("");
         setPermissionMode("acceptEdits");
+        setModel("sonnet");
+        setExtendedThinking(false);
         setSearchQuery("");
         setShowManual(false);
         onCreated();
@@ -123,7 +138,7 @@ export function CreateInstanceModal({
         setLoading(false);
       }
     },
-    [name, repoPath, permissionMode, onCreated, onClose],
+    [name, repoPath, permissionMode, model, extendedThinking, onCreated, onClose],
   );
 
   if (!open) return null;
@@ -357,6 +372,36 @@ export function CreateInstanceModal({
               ))}
             </div>
           </div>
+
+          {/* Model */}
+          <div>
+            <label className="block text-xs font-medium text-hub-text-muted mb-1.5">
+              Model
+            </label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
+            >
+              <option value="opus">Claude Opus (most capable)</option>
+              <option value="sonnet">Claude Sonnet (fast + smart)</option>
+              <option value="haiku">Claude Haiku (fastest)</option>
+            </select>
+          </div>
+
+          {/* Extended thinking */}
+          <label className="flex items-center gap-3 px-3 py-2.5 rounded-lg border bg-hub-surface-2 border-hub-border cursor-pointer">
+            <input
+              type="checkbox"
+              checked={extendedThinking}
+              onChange={(e) => setExtendedThinking(e.target.checked)}
+              className="accent-blue-500"
+            />
+            <div>
+              <div className="text-sm font-medium text-hub-text">Extended thinking</div>
+              <div className="text-xs text-hub-text-muted">Let Claude think deeply before responding</div>
+            </div>
+          </label>
 
           {/* Error */}
           {error && (

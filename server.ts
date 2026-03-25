@@ -283,6 +283,12 @@ async function initBridge(
   // has role="user" (i.e., no assistant reply yet). Once the bridge responds, the
   // latest message becomes role="assistant" and the poll won't re-trigger the same
   // message. This prevents duplicate processing without explicit tracking.
+  //
+  // Message ordering: if multiple user messages arrive while busy (msg1, msg2, msg3),
+  // the poll processes the LATEST (msg3). This is correct because Claude Code uses
+  // session resume — it sees the full conversation history including all prior messages.
+  // Processing each message separately would generate 3 independent responses, which
+  // is not the intended UX for a conversational AI.
   const pollInterval = setInterval(async () => {
     try {
       if (localInstanceIds.size === 0) return;

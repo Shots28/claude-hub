@@ -351,8 +351,9 @@ export class InstanceManager extends EventEmitter {
               fullText += delta.text;
               this.emit("text_delta", instanceId, delta.text);
 
-              // Update assistant message periodically
-              if (fullText.length % 500 < delta.text.length) {
+              // Update assistant message periodically (configurable via STREAMING_DEBOUNCE_CHARS)
+              const debounceChars = parseInt(process.env.STREAMING_DEBOUNCE_CHARS || "500", 10);
+              if (fullText.length % debounceChars < delta.text.length) {
                 await this.supabase
                   .from("chat_messages")
                   .update({ content: fullText })

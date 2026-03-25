@@ -98,6 +98,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const VALID_MODELS = ["opus", "sonnet", "haiku"];
+    const VALID_PERMISSION_MODES = ["bypassPermissions", "acceptEdits", "plan", "default"];
+
+    if (model && !VALID_MODELS.includes(model)) {
+      return NextResponse.json({ error: "model must be opus, sonnet, or haiku" }, { status: 400 });
+    }
+    if (permissionMode && !VALID_PERMISSION_MODES.includes(permissionMode)) {
+      return NextResponse.json({ error: "invalid permissionMode" }, { status: 400 });
+    }
+
     const id = randomUUID();
 
     // Validate model value

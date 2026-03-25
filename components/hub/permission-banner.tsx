@@ -41,6 +41,12 @@ function getToolInputSummary(
     if (typeof fp === "string") return { label: "File", value: fp };
   }
 
+  // Fallback: show a generic summary for unknown tools
+  const firstStringVal = Object.values(toolInput).find((v) => typeof v === "string") as string | undefined;
+  if (firstStringVal) {
+    return { label: "Input", value: firstStringVal.length > 500 ? firstStringVal.slice(0, 500) + "..." : firstStringVal };
+  }
+
   return null;
 }
 
@@ -151,7 +157,9 @@ export function PermissionBanner({
               {inputSummary.label}
             </span>
             <p className="text-xs font-mono text-amber-100/80 mt-0.5 break-all leading-relaxed">
-              {inputSummary.value}
+              {inputSummary.value.length > 500
+                ? inputSummary.value.slice(0, 500) + "..."
+                : inputSummary.value}
             </p>
           </div>
         </div>

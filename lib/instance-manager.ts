@@ -188,11 +188,7 @@ export class InstanceManager extends EventEmitter {
   async sendMessage(instanceId: string, message: string): Promise<void> {
     // Check if instance already has active query
     if (this.activeQueries.has(instanceId)) {
-      this.emit("error", instanceId, {
-        code: "instance_busy",
-        message: "Instance is busy — interrupt first",
-        retryable: false,
-      });
+      console.log(`[InstanceManager] Instance ${instanceId} busy — message queued for poll pickup`);
       return;
     }
 

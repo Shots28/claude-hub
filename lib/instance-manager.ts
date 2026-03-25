@@ -270,6 +270,13 @@ export class InstanceManager extends EventEmitter {
         permissionMode: ["bypassPermissions", "acceptEdits", "plan", "default"].includes(instance.permission_mode)
           ? instance.permission_mode
           : "default",
+        mcpServers: {
+          "plan-review": {
+            type: "stdio",
+            command: "npx",
+            args: ["tsx", "/Users/agents/tools/plan-review-mcp/src/index.ts"],
+          },
+        },
       };
 
       // Permission callback

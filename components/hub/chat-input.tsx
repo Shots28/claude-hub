@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InstanceStatus } from "@/lib/types";
 
+type SendStatus = "idle" | "sending" | "sent" | "failed";
+
 interface ChatInputProps {
   onSend: (text: string) => void;
   onInterrupt: () => void;
@@ -20,7 +22,9 @@ export function ChatInput({
   disabled = false,
 }: ChatInputProps) {
   const [text, setText] = useState("");
+  const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isRunning = instanceStatus === "running";
   const isQueued = instanceStatus === "queued";
@@ -43,14 +47,37 @@ export function ChatInput({
     textareaRef.current?.focus();
   }, []);
 
+  // Clean up fade timer on unmount
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
+
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed || isQueued) return;
-    onSend(trimmed);
-    setText("");
-    // Reset height after clearing
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+
+    setSendStatus("sending");
+    // Clear any existing fade timer
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+
+    try {
+      onSend(trimmed);
+      setText("");
+      // Reset height after clearing
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+      setSendStatus("sent");
+      fadeTimerRef.current = setTimeout(() => {
+        setSendStatus("idle");
+      }, 2000);
+    } catch {
+      setSendStatus("failed");
+      fadeTimerRef.current = setTimeout(() => {
+        setSendStatus("idle");
+      }, 3000);
     }
   };
 
@@ -128,6 +155,27 @@ export function ChatInput({
           </button>
         )}
       </div>
+
+      {/* Send status indicator */}
+      {sendStatus !== "idle" && (
+        <div className="max-w-3xl mx-auto mt-1.5 px-1">
+          <span
+            className={`text-[11px] transition-opacity duration-500 ${
+              sendStatus === "sending"
+                ? "text-hub-text-muted"
+                : sendStatus === "sent"
+                  ? "text-emerald-400"
+                  : "text-red-400"
+            }`}
+          >
+            {sendStatus === "sending"
+              ? "Sending..."
+              : sendStatus === "sent"
+                ? "Sent"
+                : "Failed to send"}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 // InstanceListMobile — Mobile-optimized instance list (slide-up panel)
 // ---------------------------------------------------------------------------
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { StatusBadge } from "./status-badge";
 import { CreateInstanceModal } from "./create-instance-modal";
@@ -25,6 +25,13 @@ export function InstanceListMobile({
   onRefresh,
 }: InstanceListMobileProps) {
   const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredInstances = useMemo(() => {
+    if (!search.trim()) return instances;
+    const q = search.toLowerCase();
+    return instances.filter((inst) => inst.name.toLowerCase().includes(q));
+  }, [instances, search]);
 
   if (!open) return null;
 
@@ -68,16 +75,29 @@ export function InstanceListMobile({
           </button>
         </div>
 
+        {/* Search input */}
+        <div className="px-4 py-2 border-b border-hub-border">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search instances..."
+            className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-1 focus:ring-hub-accent/50 focus:border-hub-accent/50 transition-colors"
+          />
+        </div>
+
         {/* Instance list */}
         <nav className="flex-1 overflow-y-auto scrollbar-hide py-2">
-          {instances.length === 0 ? (
+          {filteredInstances.length === 0 ? (
             <div className="px-4 py-8 text-center">
               <p className="text-sm text-hub-text-muted">
-                No instances yet. Create your first one!
+                {search.trim()
+                  ? "No matching instances"
+                  : "No instances yet. Create your first one!"}
               </p>
             </div>
           ) : (
-            instances.map((inst) => {
+            filteredInstances.map((inst) => {
               const isActive = inst.id === activeId;
               return (
                 <Link
@@ -110,10 +130,6 @@ export function InstanceListMobile({
                       </p>
                     )}
                   </div>
-                  <StatusBadge
-                    status={inst.status as InstanceStatus}
-                    showLabel
-                  />
                 </Link>
               );
             })

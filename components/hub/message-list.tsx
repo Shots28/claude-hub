@@ -12,6 +12,40 @@ interface MessageListProps {
   streamingMessageId?: string | null;
 }
 
+function formatDateSeparator(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+
+  // Reset times to midnight for comparison
+  const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (dateDay.getTime() === today.getTime()) return "Today";
+  if (dateDay.getTime() === yesterday.getTime()) return "Yesterday";
+
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[date.getMonth()]} ${date.getDate()}`;
+}
+
+function getDateKey(dateStr: string): string {
+  const date = new Date(dateStr);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function DateSeparator({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex-1 h-px bg-hub-border" />
+      <span className="text-[11px] font-medium text-hub-text-muted/60 uppercase tracking-wider">
+        {label}
+      </span>
+      <div className="flex-1 h-px bg-hub-border" />
+    </div>
+  );
+}
+
 export function MessageList({
   messages,
   streamingMessageId,
@@ -64,19 +98,37 @@ export function MessageList({
     );
   }
 
+  // Build message list with date separators
+  const elements: React.ReactNode[] = [];
+  let lastDateKey = "";
+
+  for (const msg of messages) {
+    const dateKey = getDateKey(msg.created_at);
+    if (dateKey !== lastDateKey) {
+      elements.push(
+        <DateSeparator
+          key={`date-${dateKey}`}
+          label={formatDateSeparator(msg.created_at)}
+        />
+      );
+      lastDateKey = dateKey;
+    }
+    elements.push(
+      <MessageBubble
+        key={msg.id}
+        message={msg}
+        isStreaming={msg.id === streamingMessageId}
+      />
+    );
+  }
+
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
       className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-1"
     >
-      {messages.map((msg) => (
-        <MessageBubble
-          key={msg.id}
-          message={msg}
-          isStreaming={msg.id === streamingMessageId}
-        />
-      ))}
+      {elements}
       <div ref={bottomRef} />
     </div>
   );

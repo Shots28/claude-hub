@@ -27,7 +27,7 @@ export function ResourceMonitor() {
 
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, 15_000);
+    const interval = setInterval(fetchHealth, 30_000);
     return () => clearInterval(interval);
   }, [fetchHealth]);
 

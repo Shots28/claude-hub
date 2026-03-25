@@ -3,7 +3,7 @@
 // InstanceSidebar — Desktop sidebar showing instance list
 // ---------------------------------------------------------------------------
 
-import { useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { StatusBadge } from "./status-badge";
 import { ResourceMonitor } from "./resource-monitor";
@@ -16,12 +16,75 @@ interface InstanceSidebarProps {
   onRefresh: () => void;
 }
 
+function InstanceContextMenu({
+  instanceId,
+  onDelete,
+  onClose,
+}: {
+  instanceId: string;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-0 top-full mt-1 z-50 w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (confirm("Delete this instance? This cannot be undone.")) {
+            onDelete(instanceId);
+          }
+          onClose();
+        }}
+        className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+      >
+        Delete
+      </button>
+    </div>
+  );
+}
+
 export function InstanceSidebar({
   instances,
   activeId,
   onRefresh,
 }: InstanceSidebarProps) {
   const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState("");
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+
+  const filteredInstances = useMemo(() => {
+    if (!search.trim()) return instances;
+    const q = search.toLowerCase();
+    return instances.filter((inst) => inst.name.toLowerCase().includes(q));
+  }, [instances, search]);
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/instances/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        onRefresh();
+      }
+    } catch {
+      // silently fail
+    }
+  };
 
   return (
     <>
@@ -53,45 +116,83 @@ export function InstanceSidebar({
           </button>
         </div>
 
+        {/* Search input */}
+        <div className="px-3 py-2 border-b border-hub-border">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search instances..."
+            className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-1.5 text-xs text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-1 focus:ring-hub-accent/50 focus:border-hub-accent/50 transition-colors"
+          />
+        </div>
+
         {/* Instance list */}
         <nav className="flex-1 overflow-y-auto scrollbar-hide py-1">
-          {instances.length === 0 ? (
+          {filteredInstances.length === 0 ? (
             <div className="px-4 py-8 text-center">
               <p className="text-xs text-hub-text-muted">
-                No instances yet
+                {search.trim() ? "No matching instances" : "No instances yet"}
               </p>
             </div>
           ) : (
-            instances.map((inst) => {
+            filteredInstances.map((inst) => {
               const isActive = inst.id === activeId;
               return (
-                <Link
-                  key={inst.id}
-                  href={`/instances/${inst.id}`}
-                  className={`block mx-2 mb-0.5 rounded-lg px-3 py-2.5 transition-colors ${
-                    isActive
-                      ? "bg-hub-accent/10 border border-hub-accent/20"
-                      : "hover:bg-hub-surface-2 border border-transparent"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <StatusBadge
-                      status={inst.status as InstanceStatus}
+                <div key={inst.id} className="relative group mx-2 mb-0.5">
+                  <Link
+                    href={`/instances/${inst.id}`}
+                    className={`block rounded-lg px-3 py-2.5 transition-colors ${
+                      isActive
+                        ? "bg-hub-accent/10 border border-hub-accent/20"
+                        : "hover:bg-hub-surface-2 border border-transparent"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <StatusBadge
+                        status={inst.status as InstanceStatus}
+                      />
+                      <span
+                        className={`text-sm font-medium truncate flex-1 ${
+                          isActive ? "text-hub-text" : "text-hub-text-muted"
+                        }`}
+                      >
+                        {inst.name}
+                      </span>
+                    </div>
+                    {inst.last_message_preview && (
+                      <p className="text-xs text-hub-text-muted/60 truncate mt-1 pl-3.5">
+                        {inst.last_message_preview}
+                      </p>
+                    )}
+                  </Link>
+
+                  {/* Context menu trigger */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
+                    }}
+                    className="absolute right-2 top-2.5 w-6 h-6 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
+                    aria-label="Instance options"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <circle cx="12" cy="5" r="2" />
+                      <circle cx="12" cy="12" r="2" />
+                      <circle cx="12" cy="19" r="2" />
+                    </svg>
+                  </button>
+
+                  {menuOpenId === inst.id && (
+                    <InstanceContextMenu
+                      instanceId={inst.id}
+                      onDelete={handleDelete}
+                      onClose={() => setMenuOpenId(null)}
                     />
-                    <span
-                      className={`text-sm font-medium truncate ${
-                        isActive ? "text-hub-text" : "text-hub-text-muted"
-                      }`}
-                    >
-                      {inst.name}
-                    </span>
-                  </div>
-                  {inst.last_message_preview && (
-                    <p className="text-xs text-hub-text-muted/60 truncate mt-1 pl-3.5">
-                      {inst.last_message_preview}
-                    </p>
                   )}
-                </Link>
+                </div>
               );
             })
           )}

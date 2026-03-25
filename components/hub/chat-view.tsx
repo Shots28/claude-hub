@@ -26,6 +26,43 @@ interface ChatViewProps {
   onLoadMessages: (instanceId: string) => Promise<void>;
 }
 
+function MessageSkeleton({ align }: { align: "left" | "right" }) {
+  return (
+    <div
+      className={`flex ${align === "right" ? "justify-end" : "justify-start"} px-4`}
+    >
+      <div
+        className={`rounded-2xl px-4 py-3 max-w-[75%] ${
+          align === "right"
+            ? "bg-hub-accent/20"
+            : "bg-hub-surface-2"
+        }`}
+      >
+        <div className="space-y-2 animate-pulse">
+          <div
+            className="h-3 rounded bg-hub-text-muted/20"
+            style={{ width: align === "right" ? "120px" : "180px" }}
+          />
+          <div
+            className="h-3 rounded bg-hub-text-muted/20"
+            style={{ width: align === "right" ? "80px" : "140px" }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingSkeletons() {
+  return (
+    <div className="flex-1 flex flex-col justify-end gap-3 py-4">
+      <MessageSkeleton align="right" />
+      <MessageSkeleton align="left" />
+      <MessageSkeleton align="right" />
+    </div>
+  );
+}
+
 export function ChatView({
   instance,
   messages,
@@ -37,10 +74,13 @@ export function ChatView({
   onLoadMessages,
 }: ChatViewProps) {
   const [streamingId, setStreamingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [clearingSession, setClearingSession] = useState(false);
 
   // Load messages when instance changes
   useEffect(() => {
-    onLoadMessages(instance.id);
+    setLoading(true);
+    onLoadMessages(instance.id).finally(() => setLoading(false));
   }, [instance.id, onLoadMessages]);
 
   // Filter messages for this instance
@@ -88,6 +128,24 @@ export function ChatView({
     onInterrupt(instance.id);
   }, [instance.id, onInterrupt]);
 
+  const handleNewChat = useCallback(async () => {
+    if (clearingSession) return;
+    setClearingSession(true);
+    try {
+      await fetch(`/api/instances/${instance.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_session_id: null }),
+      });
+      // Reload messages to show empty state
+      await onLoadMessages(instance.id);
+    } catch {
+      // silently fail
+    } finally {
+      setClearingSession(false);
+    }
+  }, [instance.id, onLoadMessages, clearingSession]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -101,12 +159,37 @@ export function ChatView({
               <StatusBadge
                 status={instance.status as InstanceStatus}
                 showLabel
+                errorMessage={instance.error_message || undefined}
               />
             </div>
             <p className="text-xs text-hub-text-muted truncate mt-0.5">
               {instance.repo_path}
             </p>
           </div>
+
+          {/* New Chat button */}
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={clearingSession}
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-hub-surface-2 text-hub-text-muted hover:text-hub-text disabled:opacity-50 transition-colors focus:outline-none"
+            aria-label="New chat"
+            title="New chat"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+              />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -121,10 +204,14 @@ export function ChatView({
       ))}
 
       {/* Messages */}
-      <MessageList
-        messages={instanceMessages}
-        streamingMessageId={streamingId}
-      />
+      {loading ? (
+        <LoadingSkeletons />
+      ) : (
+        <MessageList
+          messages={instanceMessages}
+          streamingMessageId={streamingId}
+        />
+      )}
 
       {/* Input */}
       <ChatInput

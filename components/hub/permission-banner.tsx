@@ -15,6 +15,35 @@ interface PermissionBannerProps {
 // Default timeout: 2 minutes from request time
 const TIMEOUT_MS = 2 * 60 * 1000;
 
+function getToolInputSummary(
+  toolName: string,
+  toolInput: Record<string, unknown>
+): { label: string; value: string } | null {
+  const name = toolName.toLowerCase();
+
+  if (name === "bash" || name.includes("bash")) {
+    const cmd = toolInput.command || toolInput.cmd;
+    if (typeof cmd === "string") return { label: "Command", value: cmd };
+  }
+
+  if (name === "edit" || name.includes("edit")) {
+    const fp = toolInput.file_path || toolInput.filePath || toolInput.path;
+    if (typeof fp === "string") return { label: "File", value: fp };
+  }
+
+  if (name === "write" || name.includes("write")) {
+    const fp = toolInput.file_path || toolInput.filePath || toolInput.path;
+    if (typeof fp === "string") return { label: "File", value: fp };
+  }
+
+  if (name === "read" || name.includes("read")) {
+    const fp = toolInput.file_path || toolInput.filePath || toolInput.path;
+    if (typeof fp === "string") return { label: "File", value: fp };
+  }
+
+  return null;
+}
+
 export function PermissionBanner({
   permission,
   onApprove,
@@ -25,6 +54,7 @@ export function PermissionBanner({
     const expiresAt = requested + TIMEOUT_MS;
     return Math.max(0, expiresAt - Date.now());
   });
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -46,6 +76,9 @@ export function PermissionBanner({
   const timeStr = `${minutes}:${seconds.toString().padStart(2, "0")}`;
 
   const isExpired = remainingMs <= 0;
+
+  const toolInput = (permission.input || {}) as Record<string, unknown>;
+  const inputSummary = getToolInputSummary(permission.tool_name, toolInput);
 
   return (
     <div className="animate-slide-down sticky top-0 z-20 bg-amber-500/10 border-b border-amber-500/30 px-4 py-3">
@@ -74,6 +107,15 @@ export function PermissionBanner({
             <span className="font-mono text-amber-100">
               {permission.tool_name}
             </span>
+            {inputSummary && (
+              <button
+                type="button"
+                onClick={() => setShowDetails(!showDetails)}
+                className="ml-2 text-[10px] text-amber-300/70 hover:text-amber-200 underline transition-colors"
+              >
+                {showDetails ? "hide" : "details"}
+              </button>
+            )}
           </div>
           <div className="text-xs text-amber-300/70 mt-0.5">
             {isExpired ? "Expired" : `Expires in ${timeStr}`}
@@ -100,6 +142,20 @@ export function PermissionBanner({
           </button>
         </div>
       </div>
+
+      {/* Collapsible tool input details */}
+      {showDetails && inputSummary && (
+        <div className="max-w-3xl mx-auto mt-2 px-8">
+          <div className="bg-neutral-900/50 border border-amber-500/20 rounded-lg px-3 py-2">
+            <span className="text-[10px] font-medium text-amber-300/60 uppercase tracking-wider">
+              {inputSummary.label}
+            </span>
+            <p className="text-xs font-mono text-amber-100/80 mt-0.5 break-all leading-relaxed">
+              {inputSummary.value}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

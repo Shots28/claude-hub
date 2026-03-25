@@ -30,3 +30,4 @@ Thumbs.db
 *.swp
 *.swo
 .vercel
+supabase/.temp/

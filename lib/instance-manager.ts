@@ -383,13 +383,25 @@ export class InstanceManager extends EventEmitter {
         message: errorMsg,
         retryable,
       });
-    } finally {
-      // Finalize assistant message
+
+      // Mark assistant message as error so the phone UI can show it
       if (assistantMsgId) {
         await this.supabase
           .from("chat_messages")
           .update({
-            content: fullText || "[No response]",
+            content: fullText || `Error: ${errorMsg}`,
+            status: "error",
+          })
+          .eq("id", assistantMsgId);
+      }
+      await this.updateStatus(instanceId, "error", errorMsg);
+    } finally {
+      // Finalize assistant message (only if not already handled by error path)
+      if (assistantMsgId && fullText) {
+        await this.supabase
+          .from("chat_messages")
+          .update({
+            content: fullText,
             status: "done",
           })
           .eq("id", assistantMsgId);

@@ -323,14 +323,18 @@ async function initBridge(
       await bridgeSupabase
         .from("bridge_status")
         .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
-    } catch {}
+    } catch (err) {
+      console.error("[bridge] Heartbeat write failed:", (err as Error).message);
+    }
   }, 15_000);
   // Write initial heartbeat immediately (guarantees row exists)
   try {
     await bridgeSupabase
       .from("bridge_status")
       .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
-  } catch {}
+  } catch (err) {
+    console.error("[bridge] Initial heartbeat write failed:", (err as Error).message);
+  }
 
   // --- Graceful shutdown ---
   async function shutdown(signal: string) {
@@ -344,7 +348,9 @@ async function initBridge(
       await bridgeSupabase
         .from("bridge_status")
         .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "offline" });
-    } catch {}
+    } catch (err) {
+      console.error("[bridge] Shutdown status write failed:", (err as Error).message);
+    }
 
     await bridgeSupabase.removeAllChannels();
     await manager.shutdown();

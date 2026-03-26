@@ -240,6 +240,7 @@ export class InstanceManager extends EventEmitter {
     let currentMsgId = assistantMsgId;
     let turnText = "";
 
+    let errorOccurred = false;
     try {
       // Dynamic import for the SDK (may not be available in all environments)
       let query: any;
@@ -448,6 +449,7 @@ export class InstanceManager extends EventEmitter {
           .eq("id", currentMsgId);
       }
       await this.updateStatus(instanceId, "error", errorMsg);
+      errorOccurred = true;
     } finally {
       // Finalize the current turn's message
       if (currentMsgId && turnText) {
@@ -462,7 +464,9 @@ export class InstanceManager extends EventEmitter {
 
       this.activeQueries.delete(instanceId);
       this.semaphore.release();
-      await this.updateStatus(instanceId, "idle");
+      if (!errorOccurred) {
+        await this.updateStatus(instanceId, "idle");
+      }
 
       // Start idle timer
       this.startIdleTimer(instanceId);

@@ -494,6 +494,8 @@ async function initBridge(
       }
 
       const repoPath = pathResolve(inst.repo_path);
+      let resolvedRepoPath: string;
+      try { resolvedRepoPath = await realpath(repoPath); } catch { resolvedRepoPath = repoPath; }
 
       // CRITICAL: Strip leading slashes before resolving to prevent path.resolve
       // from treating the file path as absolute (bypassing containment check).
@@ -501,7 +503,7 @@ async function initBridge(
       const resolved = pathResolve(repoPath, sanitized);
 
       // Containment check: resolved path must be inside repoPath
-      if (!resolved.startsWith(repoPath + "/") && resolved !== repoPath) {
+      if (!resolved.startsWith(resolvedRepoPath + "/") && resolved !== resolvedRepoPath) {
         await bridgeSupabase
           .from("file_requests")
           .update({ status: "error", error_message: "Path traversal blocked", completed_at: new Date().toISOString() })
@@ -521,7 +523,7 @@ async function initBridge(
         return;
       }
 
-      if (!realPath.startsWith(repoPath + "/") && realPath !== repoPath) {
+      if (!realPath.startsWith(resolvedRepoPath + "/") && realPath !== resolvedRepoPath) {
         await bridgeSupabase
           .from("file_requests")
           .update({ status: "error", error_message: "Symlink outside repository", completed_at: new Date().toISOString() })

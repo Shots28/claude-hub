@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // GET /api/bridge/status — Check if the local bridge is online
-// Reads from the dedicated bridge_status table (updated every 15s by bridge)
+// Reads from the dedicated bridge_status table (updated every 10s by bridge)
 // ---------------------------------------------------------------------------
 
 import { NextRequest, NextResponse } from "next/server";

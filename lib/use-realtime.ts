@@ -354,7 +354,7 @@ export function useRealtime(): RealtimeState {
       // Exponential backoff with jitter for retries
       const MAX_RETRIES = 5;
       const BASE_DELAY = 1000;
-      let attempt = sendRetryCountRef.current;
+      let attempt = 0;
 
       const doSend = async (): Promise<boolean> => {
         try {

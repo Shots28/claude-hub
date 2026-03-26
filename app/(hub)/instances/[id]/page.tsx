@@ -17,7 +17,10 @@ export default function InstancePage({ params }: InstancePageProps) {
     instances,
     messages,
     pendingPermissions,
+    connectionError,
+    clearError,
     sendMessage,
+    retryMessage,
     interrupt,
     approvePermission,
     denyPermission,
@@ -64,7 +67,10 @@ export default function InstancePage({ params }: InstancePageProps) {
       instance={instance}
       messages={messages}
       pendingPermissions={pendingPermissions}
+      connectionError={connectionError}
+      onClearError={clearError}
       onSendMessage={sendMessage}
+      onRetryMessage={retryMessage}
       onInterrupt={interrupt}
       onApprovePermission={approvePermission}
       onDenyPermission={denyPermission}

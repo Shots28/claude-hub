@@ -5,11 +5,13 @@
 
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./message-bubble";
-import type { DbMessage } from "@/lib/types";
+import type { UiMessage } from "@/lib/types";
 
 interface MessageListProps {
-  messages: DbMessage[];
+  messages: UiMessage[];
   streamingMessageId?: string | null;
+  onRetryMessage?: (optimisticId: string) => void;
+  onViewPlan?: (planPath: string) => void;
 }
 
 function formatDateSeparator(dateStr: string): string {
@@ -49,6 +51,8 @@ function DateSeparator({ label }: { label: string }) {
 export function MessageList({
   messages,
   streamingMessageId,
+  onRetryMessage,
+  onViewPlan,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -101,7 +105,7 @@ export function MessageList({
   // Build message list with date separators and turn separators
   const elements: React.ReactNode[] = [];
   let lastDateKey = "";
-  let prevMessage: DbMessage | null = null;
+  let prevMessage: UiMessage | null = null;
 
   for (const msg of messages) {
     const dateKey = getDateKey(msg.created_at);
@@ -135,6 +139,8 @@ export function MessageList({
         message={msg}
         isStreaming={msg.id === streamingMessageId}
         isFirstInTurn={!prevMessage || prevMessage.role !== msg.role || !!prevMessage.tool_name !== !!msg.tool_name}
+        onRetry={onRetryMessage}
+        onViewPlan={onViewPlan}
       />
     );
 

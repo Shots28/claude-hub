@@ -14,16 +14,20 @@ import type {
   DbInstance,
   DbPendingPermission,
   InstanceStatus,
+  UiMessage,
 } from "@/lib/types";
 
 // ---- Public interface ----
 
 export interface RealtimeState {
-  messages: DbMessage[];
+  messages: UiMessage[];
   instances: DbInstance[];
   pendingPermissions: DbPendingPermission[];
   connected: boolean;
+  connectionError: string | null;
+  clearError: () => void;
   sendMessage: (instanceId: string, text: string) => Promise<void>;
+  retryMessage: (optimisticId: string) => Promise<void>;
   interrupt: (instanceId: string) => Promise<void>;
   approvePermission: (permissionId: string) => Promise<void>;
   denyPermission: (permissionId: string) => Promise<void>;
@@ -34,15 +38,21 @@ export interface RealtimeState {
 // ---- Hook ----
 
 export function useRealtime(): RealtimeState {
-  const [messages, setMessages] = useState<DbMessage[]>([]);
+  const [messages, setMessages] = useState<UiMessage[]>([]);
   const [instances, setInstances] = useState<DbInstance[]>([]);
   const [pendingPermissions, setPendingPermissions] = useState<
     DbPendingPermission[]
   >([]);
   const [connected, setConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const supabaseRef = useRef(createBrowserClient());
   const activeInstanceRef = useRef<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const sendRetryCountRef = useRef(0);
+
+  const clearError = useCallback(() => {
+    setConnectionError(null);
+  }, []);
 
   // -- Fetch all instances on mount --
   const refreshInstances = useCallback(async () => {
@@ -107,7 +117,25 @@ export function useRealtime(): RealtimeState {
                 changed = true;
               }
             }
-            return changed ? merged : prev;
+
+            // Clean up stale optimistic messages:
+            // - Remove "failed" messages older than 5 minutes
+            // - NEVER remove "pending" messages by timeout
+            const FIVE_MINUTES = 5 * 60 * 1000;
+            const now = Date.now();
+            const cleaned = merged.filter((m) => {
+              if (!m.id.startsWith("optimistic-")) return true;
+              if (m.deliveryStatus === "failed") {
+                const age = now - new Date(m.created_at).getTime();
+                if (age > FIVE_MINUTES) {
+                  changed = true;
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            return changed ? cleaned : prev;
           });
 
           // Check if there's still a streaming/pending response
@@ -140,6 +168,25 @@ export function useRealtime(): RealtimeState {
 
     // Start first poll after a short delay
     pollIntervalRef.current = setTimeout(poll, 500);
+  }, []);
+
+  // -- Helper: clean up stale optimistic messages --
+  const cleanStaleOptimistic = useCallback(() => {
+    const FIVE_MINUTES = 5 * 60 * 1000;
+    const now = Date.now();
+    setMessages((prev) => {
+      const cleaned = prev.filter((m) => {
+        if (!m.id.startsWith("optimistic-")) return true;
+        // Only clean up "failed" messages older than 5 minutes
+        // NEVER remove "pending" messages by timeout
+        if (m.deliveryStatus === "failed") {
+          const age = now - new Date(m.created_at).getTime();
+          return age <= FIVE_MINUTES;
+        }
+        return true;
+      });
+      return cleaned.length !== prev.length ? cleaned : prev;
+    });
   }, []);
 
   // -- Subscribe to Realtime channels --
@@ -181,6 +228,10 @@ export function useRealtime(): RealtimeState {
         }
         console.log("[realtime] Messages channel:", status);
         setConnected(status === "SUBSCRIBED");
+        // Log channel disconnects — visibility handler will refresh on foreground
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[realtime] Messages channel disconnected:", status);
+        }
       });
 
     // Instances channel
@@ -209,6 +260,9 @@ export function useRealtime(): RealtimeState {
       )
       .subscribe((status, err) => {
         console.log("[realtime] Instances channel:", status, err || "");
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[realtime] Instances channel disconnected:", status);
+        }
       });
 
     // Permissions channel — subscribe to permission_requests table
@@ -244,27 +298,45 @@ export function useRealtime(): RealtimeState {
           }
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[realtime] Permissions channel disconnected:", status, err || "");
+        }
+      });
+
+    // -- Visibility change: refresh data when app comes to foreground --
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      console.log("[realtime] App foregrounded — refreshing data");
+      refreshInstances();
+      if (activeInstanceRef.current) {
+        loadMessages(activeInstanceRef.current);
+      }
+      // Clean stale optimistic messages on foreground
+      cleanStaleOptimistic();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     // Initial data fetch
     refreshInstances();
 
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       sb.removeChannel(messagesChannel);
       sb.removeChannel(instancesChannel);
       sb.removeChannel(permissionsChannel);
       pollingActiveRef.current = false;
       if (pollIntervalRef.current) clearTimeout(pollIntervalRef.current);
     };
-  }, [refreshInstances]);
+  }, [refreshInstances, loadMessages, cleanStaleOptimistic]);
 
   // -- Actions --
 
   const sendMessage = useCallback(
     async (instanceId: string, text: string) => {
-      // Optimistic UI — show message immediately
+      // Optimistic UI — show message immediately with "pending" delivery status
       const optimisticId = `optimistic-${Date.now()}`;
-      const optimisticMsg: DbMessage = {
+      const optimisticMsg: UiMessage = {
         id: optimisticId,
         instance_id: instanceId,
         role: "user",
@@ -274,37 +346,104 @@ export function useRealtime(): RealtimeState {
         is_error: false,
         status: "done",
         created_at: new Date().toISOString(),
+        deliveryStatus: "pending",
+        originalText: text,
       };
       setMessages((prev) => [...prev, optimisticMsg]);
 
-      try {
-        const res = await fetch(`/api/instances/${instanceId}/messages`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: text }),
-        });
-        if (res.ok) {
-          // Replace optimistic message with real one from server
-          const data = await res.json();
-          if (data.message) {
-            setMessages((prev) =>
-              prev.map((m) => (m.id === optimisticId ? data.message : m)),
-            );
+      // Exponential backoff with jitter for retries
+      const MAX_RETRIES = 5;
+      const BASE_DELAY = 1000;
+      let attempt = sendRetryCountRef.current;
+
+      const doSend = async (): Promise<boolean> => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
+          const res = await fetch(`/api/instances/${instanceId}/messages`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: text }),
+            signal: controller.signal,
+            keepalive: true,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            // Replace optimistic message with real one (delivered)
+            const data = await res.json();
+            if (data.message) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === optimisticId
+                    ? { ...data.message, deliveryStatus: "delivered" as const }
+                    : m,
+                ),
+              );
+            }
+            // Reset retry count on success
+            sendRetryCountRef.current = 0;
+            // Start polling for the response
+            startPolling(instanceId);
+            return true;
+          } else {
+            console.error("[realtime] sendMessage failed:", res.status);
+            return false;
           }
-          // Start polling for the response
-          startPolling(instanceId);
-        } else {
-          // Remove optimistic message on failure
-          setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-          console.error("[realtime] sendMessage failed:", res.status);
+        } catch (err) {
+          console.error("[realtime] sendMessage error:", err);
+          return false;
         }
-      } catch (err) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-        console.error("[realtime] sendMessage error:", err);
+      };
+
+      // First attempt
+      if (await doSend()) return;
+
+      // Retry with exponential backoff + jitter
+      while (attempt < MAX_RETRIES) {
+        attempt++;
+        const delay = Math.min(BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000, 16_000);
+        console.log(`[realtime] Retry attempt ${attempt}/${MAX_RETRIES} in ${Math.round(delay)}ms`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+
+        if (await doSend()) {
+          sendRetryCountRef.current = 0;
+          return;
+        }
       }
+
+      // All retries exhausted — mark as failed
+      sendRetryCountRef.current = attempt;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === optimisticId
+            ? { ...m, deliveryStatus: "failed" as const }
+            : m,
+        ),
+      );
+      setConnectionError("Failed to send message — tap to retry");
     },
     [startPolling],
+  );
+
+  // Retry a failed optimistic message
+  const retryMessage = useCallback(
+    async (optimisticId: string) => {
+      const failedMsg = messages.find(
+        (m) => m.id === optimisticId && m.deliveryStatus === "failed",
+      );
+      if (!failedMsg?.originalText) return;
+      const { instance_id, originalText } = failedMsg;
+      // Reset backoff timer on manual retry
+      sendRetryCountRef.current = 0;
+      clearError();
+      // Remove the failed message, then re-send
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      await sendMessage(instance_id, originalText);
+    },
+    [messages, sendMessage, clearError],
   );
 
   const interrupt = useCallback(async (instanceId: string) => {
@@ -320,27 +459,43 @@ export function useRealtime(): RealtimeState {
 
   const approvePermission = useCallback(async (permissionId: string) => {
     try {
-      await fetch(`/api/permissions/${permissionId}/resolve`, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+      const res = await fetch(`/api/permissions/${permissionId}/resolve`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "approve" }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        setConnectionError("Failed to approve permission — try again");
+      }
     } catch (err) {
       console.error("[realtime] approvePermission error:", err);
+      setConnectionError("Failed to approve permission — check connection");
     }
   }, []);
 
   const denyPermission = useCallback(async (permissionId: string) => {
     try {
-      await fetch(`/api/permissions/${permissionId}/resolve`, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
+      const res = await fetch(`/api/permissions/${permissionId}/resolve`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "deny" }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        setConnectionError("Failed to deny permission — try again");
+      }
     } catch (err) {
       console.error("[realtime] denyPermission error:", err);
+      setConnectionError("Failed to deny permission — check connection");
     }
   }, []);
 
@@ -349,7 +504,10 @@ export function useRealtime(): RealtimeState {
     instances,
     pendingPermissions,
     connected,
+    connectionError,
+    clearError,
     sendMessage,
+    retryMessage,
     interrupt,
     approvePermission,
     denyPermission,

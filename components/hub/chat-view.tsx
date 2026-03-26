@@ -8,18 +8,28 @@ import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 import { PermissionBanner } from "./permission-banner";
 import { StatusBadge } from "./status-badge";
+import { ThinkingIndicator } from "./thinking-indicator";
+import { ErrorBanner } from "./error-banner";
+import { FileViewer } from "./file-viewer";
+import { PlanViewer } from "./plan-viewer";
+import { FileActivity } from "./file-activity";
+import { useBridgeStatus, type BridgeHealth } from "@/lib/use-bridge-status";
+import { useFileActivity } from "@/lib/use-file-activity";
 import type {
-  DbMessage,
   DbInstance,
   DbPendingPermission,
   InstanceStatus,
+  UiMessage,
 } from "@/lib/types";
 
 interface ChatViewProps {
   instance: DbInstance;
-  messages: DbMessage[];
+  messages: UiMessage[];
   pendingPermissions: DbPendingPermission[];
+  connectionError: string | null;
+  onClearError: () => void;
   onSendMessage: (instanceId: string, text: string) => Promise<void>;
+  onRetryMessage: (optimisticId: string) => Promise<void>;
   onInterrupt: (instanceId: string) => Promise<void>;
   onApprovePermission: (permissionId: string) => Promise<void>;
   onDenyPermission: (permissionId: string) => Promise<void>;
@@ -67,7 +77,10 @@ export function ChatView({
   instance,
   messages,
   pendingPermissions,
+  connectionError,
+  onClearError,
   onSendMessage,
+  onRetryMessage,
   onInterrupt,
   onApprovePermission,
   onDenyPermission,
@@ -76,6 +89,12 @@ export function ChatView({
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clearingSession, setClearingSession] = useState(false);
+  const bridgeStatus = useBridgeStatus();
+
+  // File viewer / plan viewer / file activity state
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [viewingPlan, setViewingPlan] = useState<string | null>(null);
+  const [showFileActivity, setShowFileActivity] = useState(false);
 
   // Load messages when instance changes
   useEffect(() => {
@@ -96,6 +115,9 @@ export function ChatView({
     [messages, instance.id],
   );
 
+  // Extract file activity from messages
+  const fileActivity = useFileActivity(instanceMessages);
+
   // Filter permissions for this instance
   const instancePermissions = useMemo(
     () =>
@@ -114,8 +136,8 @@ export function ChatView({
   }, [instanceMessages]);
 
   const handleSend = useCallback(
-    (text: string) => {
-      onSendMessage(instance.id, text);
+    async (text: string) => {
+      await onSendMessage(instance.id, text);
     },
     [instance.id, onSendMessage],
   );
@@ -161,6 +183,21 @@ export function ChatView({
                 status={instance.status as InstanceStatus}
                 showLabel
                 errorMessage={instance.error_message || undefined}
+                hasPermission={instancePermissions.length > 0}
+                lastActivityAt={instance.last_activity_at || undefined}
+              />
+              {/* Bridge health dot */}
+              <span
+                className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                  bridgeStatus.health === "connected"
+                    ? "bg-emerald-400"
+                    : bridgeStatus.health === "slow"
+                      ? "bg-yellow-400"
+                      : bridgeStatus.health === "offline"
+                        ? "bg-red-400"
+                        : "bg-hub-text-muted/30"
+                }`}
+                title={`Bridge: ${bridgeStatus.health}`}
               />
               <span className="text-xs text-hub-text-muted ml-2">
                 {instance.model || "sonnet"}
@@ -171,32 +208,74 @@ export function ChatView({
             </p>
           </div>
 
-          {/* New Chat button */}
-          <button
-            type="button"
-            onClick={handleNewChat}
-            disabled={clearingSession}
-            className="flex-shrink-0 h-8 flex items-center justify-center px-2 rounded-lg hover:bg-hub-surface-2 text-hub-text-muted hover:text-hub-text disabled:opacity-50 transition-colors focus:outline-none"
-            aria-label="New chat"
-            title="New chat"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {/* File activity button */}
+            {fileActivity.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowFileActivity(true)}
+                className="relative h-8 flex items-center justify-center px-2 rounded-lg hover:bg-hub-surface-2 text-hub-text-muted hover:text-hub-text transition-colors focus:outline-none"
+                aria-label={`${fileActivity.length} files touched`}
+                title={`${fileActivity.length} files touched`}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+                  />
+                </svg>
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-hub-accent text-[9px] font-bold text-white px-1">
+                  {fileActivity.length}
+                </span>
+              </button>
+            )}
+
+            {/* New Chat button */}
+            <button
+              type="button"
+              onClick={handleNewChat}
+              disabled={clearingSession}
+              className="h-8 flex items-center justify-center px-2 rounded-lg hover:bg-hub-surface-2 text-hub-text-muted hover:text-hub-text disabled:opacity-50 transition-colors focus:outline-none"
+              aria-label="New chat"
+              title="New chat"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 4.5v15m7.5-7.5h-15"
-              />
-            </svg>
-            <span className="text-[10px] ml-1">New</span>
-          </button>
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4.5v15m7.5-7.5h-15"
+                />
+              </svg>
+              <span className="text-[10px] ml-1">New</span>
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Bridge offline warning */}
+      {bridgeStatus.health === "offline" && (
+        <div className="flex-shrink-0 bg-yellow-500/10 border-b border-yellow-500/20 px-4 py-2">
+          <p className="text-xs text-yellow-400 text-center">
+            Bridge appears offline — your message will be queued
+          </p>
+        </div>
+      )}
+
+      {/* Connection error banner */}
+      <ErrorBanner message={connectionError} onDismiss={onClearError} />
 
       {/* Permission banners */}
       {instancePermissions.map((perm) => (
@@ -215,8 +294,17 @@ export function ChatView({
         <MessageList
           messages={instanceMessages}
           streamingMessageId={streamingId}
+          onRetryMessage={onRetryMessage}
+          onViewPlan={(planPath) => setViewingPlan(planPath)}
         />
       )}
+
+      {/* Thinking/processing indicator */}
+      <ThinkingIndicator
+        instanceStatus={instance.status as InstanceStatus}
+        messages={instanceMessages}
+        pendingPermissions={instancePermissions}
+      />
 
       {/* Input */}
       <ChatInput
@@ -224,6 +312,37 @@ export function ChatView({
         onInterrupt={handleInterrupt}
         instanceStatus={instance.status as InstanceStatus}
       />
+
+      {/* File viewer modal */}
+      {viewingFile && (
+        <FileViewer
+          instanceId={instance.id}
+          filePath={viewingFile}
+          onClose={() => setViewingFile(null)}
+        />
+      )}
+
+      {/* Plan viewer modal (with auto-refresh) */}
+      {viewingPlan && (
+        <PlanViewer
+          instanceId={instance.id}
+          planPath={viewingPlan}
+          instanceStatus={instance.status as InstanceStatus}
+          onClose={() => setViewingPlan(null)}
+        />
+      )}
+
+      {/* File activity panel */}
+      {showFileActivity && (
+        <FileActivity
+          files={fileActivity}
+          onViewFile={(path) => {
+            setShowFileActivity(false);
+            setViewingFile(path);
+          }}
+          onClose={() => setShowFileActivity(false)}
+        />
+      )}
     </div>
   );
 }

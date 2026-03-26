@@ -2,8 +2,11 @@
   "name": "Claude Hub",
   "short_name": "Claude Hub",
   "description": "Mobile control center for Claude Code instances",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone"],
   "background_color": "#0a0a0a",
   "theme_color": "#3b82f6",
   "orientation": "portrait-primary",
@@ -16,7 +19,8 @@
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

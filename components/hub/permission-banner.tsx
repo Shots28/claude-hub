@@ -3,7 +3,7 @@
 // PermissionBanner — Sticky banner for pending permission requests
 // ---------------------------------------------------------------------------
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DbPendingPermission } from "@/lib/types";
 
 interface PermissionBannerProps {
@@ -14,6 +14,88 @@ interface PermissionBannerProps {
 
 // Default timeout: 5 minutes from request time (matches server-side timeout)
 const TIMEOUT_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Audio alert via Web Audio API (works on iOS 17+ with oscillator trick)
+// ---------------------------------------------------------------------------
+
+let _audioCtx: AudioContext | null = null;
+let _audioUnlocked = false;
+
+/**
+ * Unlock AudioContext on the first user gesture (tap/click).
+ * iOS requires a connected oscillator before ctx.resume() works.
+ */
+function unlockAudio(): void {
+  if (_audioUnlocked) return;
+
+  try {
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    _audioCtx = new AudioContextClass();
+    // iOS 17+ needs a real oscillator connected before resume
+    const osc = _audioCtx.createOscillator();
+    osc.connect(_audioCtx.destination);
+    osc.start();
+    osc.stop();
+    _audioCtx.resume().catch(() => {});
+    _audioUnlocked = true;
+  } catch {
+    // Audio not available — silently ignore
+  }
+}
+
+// Register the unlock handler once
+if (typeof window !== "undefined") {
+  const handler = () => {
+    unlockAudio();
+    document.removeEventListener("click", handler, true);
+    document.removeEventListener("touchstart", handler, true);
+  };
+  document.addEventListener("click", handler, true);
+  document.addEventListener("touchstart", handler, true);
+}
+
+/**
+ * Play a short attention-grabbing chime using Web Audio API oscillators.
+ * Falls back silently if AudioContext is not unlocked.
+ */
+function playAlertChime(): void {
+  if (!_audioCtx || _audioCtx.state !== "running") return;
+
+  try {
+    const ctx = _audioCtx;
+    const now = ctx.currentTime;
+
+    // Two-tone chime: ascending notes
+    const frequencies = [523.25, 659.25]; // C5, E5
+    for (let i = 0; i < frequencies.length; i++) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.value = frequencies[i];
+
+      gain.gain.setValueAtTime(0.3, now + i * 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.3);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + i * 0.15);
+      osc.stop(now + i * 0.15 + 0.35);
+    }
+  } catch {
+    // Audio playback failed — silently ignore
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tool input summary helper
+// ---------------------------------------------------------------------------
 
 function getToolInputSummary(
   toolName: string,
@@ -50,6 +132,10 @@ function getToolInputSummary(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function PermissionBanner({
   permission,
   onApprove,
@@ -61,6 +147,21 @@ export function PermissionBanner({
     return Math.max(0, expiresAt - Date.now());
   });
   const [showDetails, setShowDetails] = useState(false);
+  const alertFiredRef = useRef(false);
+
+  // Fire sound + haptic once when the banner first appears
+  useEffect(() => {
+    if (alertFiredRef.current) return;
+    alertFiredRef.current = true;
+
+    // Haptic feedback (Android — no-op on iOS)
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(200);
+    }
+
+    // Audio chime via Web Audio API
+    playAlertChime();
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -87,12 +188,13 @@ export function PermissionBanner({
   const inputSummary = getToolInputSummary(permission.tool_name, toolInput);
 
   return (
-    <div className="animate-slide-down sticky top-0 z-20 bg-amber-500/10 border-b border-amber-500/30 px-4 py-3">
+    <div className="animate-slide-down sticky top-0 z-20 bg-amber-500/10 border-b border-amber-500/30 px-4 py-3 shadow-[0_0_15px_rgba(245,158,11,0.15)]">
       <div className="max-w-3xl mx-auto flex items-center gap-3">
-        {/* Warning icon */}
-        <div className="flex-shrink-0">
+        {/* Warning icon with pulse animation */}
+        <div className="flex-shrink-0 relative">
+          <div className="absolute inset-0 rounded-full bg-amber-400/20 animate-ping" />
           <svg
-            className="w-5 h-5 text-amber-400"
+            className="w-5 h-5 text-amber-400 relative"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"

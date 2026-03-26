@@ -17,8 +17,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import next from "next";
 import { parse } from "url";
-import { readdir, access } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, access, readFile, stat, realpath } from "node:fs/promises";
+import { join, resolve as pathResolve } from "node:path";
 import { homedir } from "node:os";
 
 // ---------------------------------------------------------------------------
@@ -157,6 +157,78 @@ async function initBridge(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
+
+  // --- Push notification helper ---
+  // Sends a push notification via the Next.js API route.
+  // Non-blocking: errors are logged but never throw.
+  const APP_URL = process.env.APP_URL; // e.g. https://claude-hub.vercel.app or http://localhost:3100
+  const PUSH_API_SECRET = process.env.PUSH_API_SECRET;
+
+  async function sendPushNotification(payload: {
+    title: string;
+    body: string;
+    instanceId?: string;
+    tag?: string;
+  }): Promise<void> {
+    if (!APP_URL || !PUSH_API_SECRET) return;
+    try {
+      await fetch(`${APP_URL}/api/push/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${PUSH_API_SECRET}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.error("[bridge] Push notification failed:", (err as Error).message);
+    }
+  }
+
+  // Helper to get instance name for push notifications
+  async function getInstanceName(instanceId: string): Promise<string> {
+    try {
+      const { data } = await bridgeSupabase
+        .from("instances")
+        .select("name")
+        .eq("id", instanceId)
+        .single();
+      return data?.name || instanceId.slice(0, 8);
+    } catch {
+      return instanceId.slice(0, 8);
+    }
+  }
+
+  // --- Push notification triggers ---
+  // Fire when Claude finishes (idle), needs permission, or errors
+  manager.on("status_change", async (instanceId: string, status: string, error?: string) => {
+    const name = await getInstanceName(instanceId);
+    if (status === "idle") {
+      sendPushNotification({
+        title: `${name} completed`,
+        body: "Claude finished processing.",
+        instanceId,
+        tag: `idle-${instanceId}`,
+      });
+    } else if (status === "error") {
+      sendPushNotification({
+        title: `${name} error`,
+        body: error || "An error occurred.",
+        instanceId,
+        tag: `error-${instanceId}`,
+      });
+    }
+  });
+
+  manager.on("permission_request", async (instanceId: string, data: any) => {
+    const name = await getInstanceName(instanceId);
+    sendPushNotification({
+      title: `${name} needs approval`,
+      body: `Permission requested: ${data.toolName}`,
+      instanceId,
+      tag: `perm-${data.id}`,
+    });
+  });
 
   // --- Build local instance ownership cache ---
   const localRepoPaths = new Set(repos.map((r) => r.path));
@@ -345,7 +417,7 @@ async function initBridge(
     }
   }, 30_000);
 
-  // --- Bridge heartbeat — update every 15s so the UI can detect if bridge is alive ---
+  // --- Bridge heartbeat — update every 10s so the UI can detect if bridge is alive ---
   const heartbeatInterval = setInterval(async () => {
     try {
       await bridgeSupabase
@@ -354,7 +426,7 @@ async function initBridge(
     } catch (err) {
       console.error("[bridge] Heartbeat write failed:", (err as Error).message);
     }
-  }, 15_000);
+  }, 10_000);
   // Write initial heartbeat immediately (guarantees row exists)
   try {
     await bridgeSupabase
@@ -364,11 +436,181 @@ async function initBridge(
     console.error("[bridge] Initial heartbeat write failed:", (err as Error).message);
   }
 
+  // --- File request handler: read files on behalf of the frontend ---
+  const FILE_SIZE_LIMIT = 1 * 1024 * 1024; // 1MB
+
+  async function handleFileRequest(requestRow: any) {
+    const { id, instance_id, file_path: rawFilePath } = requestRow;
+    try {
+      // Look up the instance to get repo_path
+      const { data: inst } = await bridgeSupabase
+        .from("instances")
+        .select("repo_path")
+        .eq("id", instance_id)
+        .maybeSingle();
+
+      if (!inst?.repo_path) {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: "Instance not found", completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      const repoPath = pathResolve(inst.repo_path);
+
+      // CRITICAL: Strip leading slashes before resolving to prevent path.resolve
+      // from treating the file path as absolute (bypassing containment check).
+      const sanitized = rawFilePath.replace(/^\/+/, "");
+      const resolved = pathResolve(repoPath, sanitized);
+
+      // Containment check: resolved path must be inside repoPath
+      if (!resolved.startsWith(repoPath + "/") && resolved !== repoPath) {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: "Path traversal blocked", completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      // Resolve symlinks and re-check containment
+      let realPath: string;
+      try {
+        realPath = await realpath(resolved);
+      } catch {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: "File not found", completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      if (!realPath.startsWith(repoPath + "/") && realPath !== repoPath) {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: "Symlink outside repository", completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      // Check file size
+      const fileStat = await stat(realPath);
+      if (!fileStat.isFile()) {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: "Not a regular file", completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      if (fileStat.size > FILE_SIZE_LIMIT) {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: `File too large (${(fileStat.size / 1024 / 1024).toFixed(1)}MB > 1MB limit)`, completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      // Read file content
+      const buffer = await readFile(realPath);
+
+      // Binary check: look for null bytes in first 8KB
+      const checkBytes = buffer.subarray(0, 8192);
+      if (checkBytes.includes(0)) {
+        await bridgeSupabase
+          .from("file_requests")
+          .update({ status: "error", error_message: "Binary file not supported", completed_at: new Date().toISOString() })
+          .eq("id", id);
+        return;
+      }
+
+      const content = buffer.toString("utf-8");
+
+      await bridgeSupabase
+        .from("file_requests")
+        .update({ status: "completed", content, completed_at: new Date().toISOString() })
+        .eq("id", id);
+
+      console.log(`[bridge] File request ${id}: served ${realPath} (${fileStat.size} bytes)`);
+    } catch (err) {
+      console.error(`[bridge] File request ${id} error:`, err);
+      await bridgeSupabase
+        .from("file_requests")
+        .update({ status: "error", error_message: (err as Error).message, completed_at: new Date().toISOString() })
+        .eq("id", id);
+    }
+  }
+
+  // Subscribe to new file requests
+  bridgeSupabase
+    .channel("bridge-file-requests")
+    .on(
+      "postgres_changes",
+      {
+        event: "INSERT",
+        schema: "public",
+        table: "file_requests",
+        filter: "status=eq.pending",
+      },
+      async (payload: any) => {
+        const row = payload.new;
+        if (!row?.id || row.status !== "pending") return;
+        // Only handle requests for local instances
+        if (!localInstanceIds.has(row.instance_id)) return;
+        await handleFileRequest(row);
+      }
+    )
+    .subscribe((status: string) => {
+      console.log(`[bridge] File requests subscription: ${status}`);
+    });
+
+  // --- File request cleanup: delete completed requests older than 1 hour ---
+  async function cleanupFileRequests() {
+    try {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data } = await bridgeSupabase
+        .from("file_requests")
+        .delete()
+        .lt("completed_at", oneHourAgo)
+        .not("completed_at", "is", null)
+        .select("id");
+      if (data?.length) {
+        console.log(`[bridge] Cleaned up ${data.length} old file requests`);
+      }
+    } catch (err) {
+      console.error("[bridge] File request cleanup error:", err);
+    }
+  }
+
+  // Run cleanup on startup and every 30 minutes
+  await cleanupFileRequests();
+  const fileCleanupInterval = setInterval(cleanupFileRequests, 30 * 60 * 1000);
+
+  // Also process any pending file requests on startup (in case bridge was restarted)
+  try {
+    if (localInstanceIds.size > 0) {
+      const { data: pendingRequests } = await bridgeSupabase
+        .from("file_requests")
+        .select("*")
+        .eq("status", "pending")
+        .in("instance_id", Array.from(localInstanceIds));
+      if (pendingRequests?.length) {
+        console.log(`[bridge] Processing ${pendingRequests.length} pending file requests from before restart`);
+        for (const req of pendingRequests) {
+          await handleFileRequest(req);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[bridge] Startup file request sweep error:", err);
+  }
+
   // --- Graceful shutdown ---
   async function shutdown(signal: string) {
     console.log(`\n[server] Received ${signal}, shutting down...`);
     clearInterval(pollInterval);
     clearInterval(heartbeatInterval);
+    clearInterval(fileCleanupInterval);
     if (refreshTimer) clearTimeout(refreshTimer);
 
     // Mark bridge as offline immediately so UI reflects shutdown

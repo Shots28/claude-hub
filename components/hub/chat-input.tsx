@@ -6,10 +6,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InstanceStatus } from "@/lib/types";
 
-type SendStatus = "idle" | "sending" | "sent" | "failed";
-
 interface ChatInputProps {
-  onSend: (text: string) => void;
+  onSend: (text: string) => Promise<void>;
   onInterrupt: () => void;
   instanceStatus: InstanceStatus;
   disabled?: boolean;
@@ -22,11 +20,9 @@ export function ChatInput({
   disabled = false,
 }: ChatInputProps) {
   const [text, setText] = useState("");
-  const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
@@ -52,30 +48,22 @@ export function ChatInput({
     textareaRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-    };
-  }, []);
-
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = text.trim().replace(/\0/g, "");
     if (!trimmed || trimmed.length > 50000) return;
 
-    setSendStatus("sending");
-    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    // Clear input immediately for responsiveness
+    setText("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
 
+    // Delivery status is now shown on the message bubble itself (pending/delivered/failed)
+    // No misleading "Sent" status here — the bubble's delivery indicator is the source of truth
     try {
-      onSend(trimmed);
-      setText("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
-      }
-      setSendStatus("sent");
-      fadeTimerRef.current = setTimeout(() => setSendStatus("idle"), 2000);
+      await onSend(trimmed);
     } catch {
-      setSendStatus("failed");
-      fadeTimerRef.current = setTimeout(() => setSendStatus("idle"), 3000);
+      // Error handling is in use-realtime.ts — message bubble shows "failed" state
     }
   };
 
@@ -246,27 +234,9 @@ export function ChatInput({
       </div>
 
       {/* Status indicators */}
-      {(sendStatus !== "idle" || recording) && (
+      {recording && (
         <div className="max-w-3xl mx-auto mt-1.5 px-1">
-          <span
-            className={`text-[11px] ${
-              recording
-                ? "text-red-400"
-                : sendStatus === "sending"
-                  ? "text-hub-text-muted"
-                  : sendStatus === "sent"
-                    ? "text-emerald-400"
-                    : "text-red-400"
-            }`}
-          >
-            {recording
-              ? "Recording..."
-              : sendStatus === "sending"
-                ? "Sending..."
-                : sendStatus === "sent"
-                  ? "Sent"
-                  : "Failed to send"}
-          </span>
+          <span className="text-[11px] text-red-400">Recording...</span>
         </div>
       )}
     </div>

@@ -40,6 +40,26 @@
   animation: pulse-status 2s ease-in-out infinite;
 }
 
+/* Orange pulsing animation for "waiting for permission" */
+@keyframes pulse-permission {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.6); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(249, 115, 22, 0); }
+}
+
+.pulse-permission {
+  animation: pulse-permission 1.5s ease-in-out infinite;
+}
+
+/* Slow, subtle pulse for pending/optimistic messages */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 2.5s ease-in-out infinite;
+}
+
 /* Permission banner slide-in */
 @keyframes slide-down {
   from { transform: translateY(-100%); opacity: 0; }

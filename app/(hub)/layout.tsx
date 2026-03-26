@@ -13,6 +13,7 @@ import {
   HubRealtimeProvider,
   useHubRealtime,
 } from "@/lib/hub-context";
+import { useUnreadCount } from "@/lib/use-unread-count";
 
 function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -24,6 +25,12 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const activeInstanceId = pathname.startsWith("/instances/")
     ? pathname.split("/")[2]
     : undefined;
+
+  // Track unread messages per instance
+  const { unreadCounts, totalUnread } = useUnreadCount(
+    realtime.messages,
+    activeInstanceId
+  );
 
   // Determine active bottom nav tab
   const activeTab = pathname.startsWith("/settings")
@@ -57,7 +64,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setMobileListOpen(true)}
-            className={`flex flex-col items-center justify-center gap-0.5 w-full h-full transition-colors ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 w-full h-full transition-colors ${
               activeTab === "instances" && !activeInstanceId
                 ? "text-hub-accent"
                 : "text-hub-text-muted"
@@ -77,6 +84,11 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
               />
             </svg>
             <span className="text-[10px] font-medium">Instances</span>
+            {totalUnread > 0 && (
+              <span className="absolute top-1 right-1/4 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white px-1">
+                {totalUnread > 99 ? "99+" : totalUnread}
+              </span>
+            )}
           </button>
 
           {/* New Instance tab */}
@@ -140,6 +152,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
         open={mobileListOpen}
         onClose={() => setMobileListOpen(false)}
         onRefresh={handleRefresh}
+        unreadCounts={unreadCounts}
       />
 
       {/* Mobile create instance modal */}

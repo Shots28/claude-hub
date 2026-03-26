@@ -15,6 +15,7 @@ interface InstanceListMobileProps {
   open: boolean;
   onClose: () => void;
   onRefresh: () => void;
+  unreadCounts?: Record<string, number>;
 }
 
 function MobileActionMenu({
@@ -81,6 +82,7 @@ export function InstanceListMobile({
   open,
   onClose,
   onRefresh,
+  unreadCounts = {},
 }: InstanceListMobileProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
@@ -270,6 +272,15 @@ export function InstanceListMobile({
                             </p>
                           )}
                         </div>
+
+                        {/* Unread badge */}
+                        {(unreadCounts[inst.id] ?? 0) > 0 && (
+                          <span className="flex-shrink-0 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1.5">
+                            {unreadCounts[inst.id] > 99
+                              ? "99+"
+                              : unreadCounts[inst.id]}
+                          </span>
+                        )}
 
                         {/* More actions button */}
                         <button

@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/api/auth/check",
   "/api/auth/logout",
   "/api/health",
+  "/api/push/send", // Bearer token auth handled internally, not cookie
   "/login",
 ];
 
@@ -25,6 +26,8 @@ export function middleware(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/icon-") ||
+    pathname.startsWith("/sounds/") ||
+    pathname === "/sw.js" ||
     pathname === "/manifest.json" ||
     pathname === "/favicon.ico"
   ) {

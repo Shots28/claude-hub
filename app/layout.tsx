@@ -1,9 +1,17 @@
 import type { Metadata, Viewport } from "next";
+import { SwRegister } from "@/components/hub/sw-register";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Claude Hub",
   description: "Mobile control center for Claude Code instances",
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+  },
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -28,6 +36,7 @@ export default function RootLayout({
         }}
         className="bg-hub-bg text-hub-text antialiased min-h-dvh"
       >
+        <SwRegister />
         {children}
       </body>
     </html>

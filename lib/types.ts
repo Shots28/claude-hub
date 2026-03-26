@@ -184,6 +184,14 @@ export type DbMessage = {
   created_at: string;
 };
 
+// Frontend-only extension for optimistic UI — not stored in Supabase
+export type DeliveryStatus = "pending" | "delivered" | "failed";
+
+export type UiMessage = DbMessage & {
+  deliveryStatus?: DeliveryStatus;
+  originalText?: string; // preserved for retry on failed messages
+};
+
 export type DbPendingPermission = {
   id: string;
   instance_id: string;
@@ -239,6 +247,17 @@ export type DbEvent = {
   event: string;
   details: Record<string, unknown> | null;
   created_at: string;
+};
+
+export type DbFileRequest = {
+  id: string;
+  instance_id: string;
+  file_path: string;
+  status: "pending" | "completed" | "error";
+  content: string | null;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
 };
 
 // ---- Supabase generated-style database interface ----
@@ -376,6 +395,26 @@ export interface Database {
         Insert: Omit<DbEvent, "id" | "created_at"> & { id?: string; created_at?: string };
         Update: Partial<Omit<DbEvent, "id">>;
         Relationships: [];
+      };
+      file_requests: {
+        Row: DbFileRequest;
+        Insert: Omit<DbFileRequest, "id" | "created_at" | "completed_at" | "content" | "error_message"> & {
+          id?: string;
+          created_at?: string;
+          completed_at?: string | null;
+          content?: string | null;
+          error_message?: string | null;
+        };
+        Update: Partial<Omit<DbFileRequest, "id">>;
+        Relationships: [
+          {
+            foreignKeyName: "file_requests_instance_id_fkey";
+            columns: ["instance_id"];
+            isOneToOne: false;
+            referencedRelation: "instances";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: {};

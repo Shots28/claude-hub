@@ -11,6 +11,23 @@ interface ToolCallBlockProps {
   input?: Record<string, unknown>;
   output?: string;
   isError?: boolean;
+  /** Called when user clicks "View Plan" — parent provides instanceId + plan path */
+  onViewPlan?: (planPath: string) => void;
+}
+
+/** Check if a Write tool call targets a plan file */
+function isPlanWrite(
+  toolName: string,
+  input?: Record<string, unknown>,
+): string | null {
+  if (toolName !== "Write") return null;
+  const filePath = input?.file_path;
+  if (typeof filePath !== "string") return null;
+  // Match .claude/plans/*.md anywhere in the path
+  if (/\.claude\/plans\/[^/]+\.md$/.test(filePath)) {
+    return filePath;
+  }
+  return null;
 }
 
 export function ToolCallBlock({
@@ -19,6 +36,7 @@ export function ToolCallBlock({
   input,
   output,
   isError = false,
+  onViewPlan,
 }: ToolCallBlockProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -27,6 +45,8 @@ export function ToolCallBlock({
     : "border-emerald-500/30";
   const iconColor = isError ? "text-red-400" : "text-emerald-400";
   const bgColor = isError ? "bg-red-500/5" : "bg-emerald-500/5";
+
+  const planPath = isPlanWrite(toolName, input);
 
   return (
     <div
@@ -73,6 +93,27 @@ export function ToolCallBlock({
           Used{" "}
           <span className={`font-mono ${iconColor}`}>{toolName}</span>
         </span>
+
+        {/* "View Plan" button */}
+        {planPath && onViewPlan && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewPlan(planPath);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                onViewPlan(planPath);
+              }
+            }}
+            className="text-[10px] font-medium text-blue-400 px-2 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 transition-colors cursor-pointer"
+          >
+            View Plan
+          </span>
+        )}
 
         {isError && (
           <span className="text-[10px] font-medium text-red-400 px-1.5 py-0.5 rounded bg-red-500/10">

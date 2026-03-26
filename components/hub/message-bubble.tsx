@@ -6,18 +6,22 @@
 import { useState } from "react";
 import { StreamingText } from "./streaming-text";
 import { ToolCallBlock } from "./tool-call-block";
-import type { DbMessage } from "@/lib/types";
+import type { UiMessage } from "@/lib/types";
 
 interface MessageBubbleProps {
-  message: DbMessage;
+  message: UiMessage;
   isStreaming?: boolean;
   isFirstInTurn?: boolean;
+  onRetry?: (optimisticId: string) => void;
+  onViewPlan?: (planPath: string) => void;
 }
 
 export function MessageBubble({
   message,
   isStreaming = false,
   isFirstInTurn = false,
+  onRetry,
+  onViewPlan,
 }: MessageBubbleProps) {
   const [showCopy, setShowCopy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -53,6 +57,7 @@ export function MessageBubble({
           input={typeof parsedInput === "object" ? parsedInput : undefined}
           output={message.content}
           isError={message.is_error}
+          onViewPlan={onViewPlan}
         />
       </div>
     );
@@ -95,7 +100,7 @@ export function MessageBubble({
             isUser
               ? "bg-blue-600 text-white rounded-br-md"
               : "bg-hub-surface-2 text-hub-text rounded-bl-md"
-          }`}
+          } ${message.deliveryStatus === "pending" ? "animate-pulse-slow" : ""}`}
         >
           {isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">
@@ -109,7 +114,7 @@ export function MessageBubble({
           )}
         </div>
 
-        {/* Timestamp + copy button */}
+        {/* Timestamp + delivery status + copy */}
         <div
           className={`flex items-center gap-1.5 mt-0.5 ${
             isUser ? "justify-end" : "justify-start"
@@ -118,6 +123,33 @@ export function MessageBubble({
           <span className="text-[10px] text-hub-text-muted/60">
             {timeStr}
           </span>
+
+          {/* Delivery status for user messages */}
+          {isUser && message.deliveryStatus === "pending" && (
+            <svg className="w-3 h-3 text-hub-text-muted/50 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+          )}
+          {isUser && message.deliveryStatus === "delivered" && (
+            <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+          {isUser && message.deliveryStatus === "failed" && (
+            <button
+              type="button"
+              onClick={() => onRetry?.(message.id)}
+              className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              Tap to retry
+            </button>
+          )}
 
           {(showCopy || copied) && (
             <button

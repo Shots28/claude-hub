@@ -338,9 +338,13 @@ async function initBridge(
           localInstanceIds.add(instanceId);
         }
 
-        // Skip if already running
+        // Skip if already running — mark as queued so the poll picks it up
         if (manager.isRunning(instanceId)) {
-          console.log(`[bridge] Instance ${instanceId} busy, skipping`);
+          console.log(`[bridge] Instance ${instanceId} busy, marking queued for poll pickup`);
+          await bridgeSupabase
+            .from("instances")
+            .update({ status: "queued", updated_at: new Date().toISOString() })
+            .eq("id", instanceId);
           return;
         }
 
@@ -361,6 +365,25 @@ async function initBridge(
           } catch (dbErr) {
             console.error("[bridge] Failed to update error status:", dbErr);
           }
+        }
+
+        // After completion, re-check for newer unprocessed user messages
+        try {
+          const { data: latest } = await bridgeSupabase
+            .from("chat_messages")
+            .select("role, content")
+            .eq("instance_id", instanceId)
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+          if (latest?.[0]?.role === "user" && !manager.isRunning(instanceId)) {
+            console.log(`[bridge] Re-processing pending message for instance ${instanceId}`);
+            manager.sendMessage(instanceId, latest[0].content).catch((err: any) => {
+              console.error(`[bridge] Re-process failed for ${instanceId}:`, err);
+            });
+          }
+        } catch (err) {
+          console.error(`[bridge] Re-check failed for ${instanceId}:`, err);
         }
       }
     )

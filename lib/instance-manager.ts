@@ -356,22 +356,26 @@ export class InstanceManager extends EventEmitter {
                 .from("chat_messages")
                 .update({ content: turnText, status: "done" })
                 .eq("id", currentMsgId);
-            }
 
-            // Create new message for this turn
-            const { data: newMsg } = await this.supabase
-              .from("chat_messages")
-              .insert({
-                instance_id: instanceId,
-                role: "assistant",
-                content: "",
-                status: "streaming",
-              })
-              .select()
-              .single();
+              // Create new message for subsequent turns
+              const { data: newMsg } = await this.supabase
+                .from("chat_messages")
+                .insert({
+                  instance_id: instanceId,
+                  role: "assistant",
+                  content: "",
+                  status: "streaming",
+                })
+                .select()
+                .single();
 
-            if (newMsg) {
-              currentMsgId = newMsg.id;
+              if (newMsg) {
+                currentMsgId = newMsg.id;
+                turnText = "";
+              }
+            } else {
+              // First message_start — reuse the initial placeholder
+              // (currentMsgId is already assistantMsgId, turnText is empty)
               turnText = "";
             }
           } else if (streamEvent?.type === "content_block_delta") {
@@ -501,10 +505,8 @@ export class InstanceManager extends EventEmitter {
       totalCostUsd: 0,
     });
 
-    this.activeQueries.delete(instanceId);
-    this.semaphore.release();
-    await this.updateStatus(instanceId, "idle");
-    this.startIdleTimer(instanceId);
+    // Cleanup (activeQueries.delete, semaphore.release, updateStatus)
+    // is handled by the caller's finally block in sendMessage()
   }
 
   private async handlePermissionRequest(

@@ -418,23 +418,59 @@ async function initBridge(
   }, 30_000);
 
   // --- Bridge heartbeat — update every 10s so the UI can detect if bridge is alive ---
-  const heartbeatInterval = setInterval(async () => {
-    try {
-      await bridgeSupabase
-        .from("bridge_status")
-        .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
-    } catch (err) {
-      console.error("[bridge] Heartbeat write failed:", (err as Error).message);
-    }
-  }, 10_000);
-  // Write initial heartbeat immediately (guarantees row exists)
-  try {
-    await bridgeSupabase
-      .from("bridge_status")
-      .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "online" });
-  } catch (err) {
-    console.error("[bridge] Initial heartbeat write failed:", (err as Error).message);
+  // Uses direct REST API instead of Supabase JS client to avoid PostgREST schema cache issues
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  console.log(`[bridge] Heartbeat target: ${supabaseUrl?.slice(-30)} (key length: ${supabaseKey?.length})`);
+
+  // Use Node.js https module directly to avoid Next.js fetch patching
+  const https = await import("node:https");
+
+  async function writeHeartbeat(status: "online" | "offline") {
+    return new Promise<void>((resolve) => {
+      const payload = JSON.stringify({
+        id: "default",
+        last_heartbeat_at: new Date().toISOString(),
+        status,
+      });
+      const url = new URL(`${supabaseUrl}/rest/v1/bridge_status`);
+      const req = https.request(
+        {
+          hostname: url.hostname,
+          path: url.pathname,
+          method: "POST",
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates",
+            "Content-Length": Buffer.byteLength(payload),
+          },
+        },
+        (res) => {
+          let body = "";
+          res.on("data", (c: Buffer) => (body += c));
+          res.on("end", () => {
+            if (res.statusCode && res.statusCode >= 400) {
+              console.error(`[bridge] Heartbeat write failed (${res.statusCode}):`, body);
+            }
+            resolve();
+          });
+        },
+      );
+      req.on("error", (err) => {
+        console.error("[bridge] Heartbeat write failed:", err.message);
+        resolve();
+      });
+      req.write(payload);
+      req.end();
+    });
   }
+
+  const heartbeatInterval = setInterval(() => writeHeartbeat("online"), 10_000);
+  // Write initial heartbeat immediately
+  await writeHeartbeat("online");
+  console.log("[bridge] Heartbeat started (10s interval)");
 
   // --- File request handler: read files on behalf of the frontend ---
   const FILE_SIZE_LIMIT = 1 * 1024 * 1024; // 1MB
@@ -615,9 +651,7 @@ async function initBridge(
 
     // Mark bridge as offline immediately so UI reflects shutdown
     try {
-      await bridgeSupabase
-        .from("bridge_status")
-        .upsert({ id: "default", last_heartbeat_at: new Date().toISOString(), status: "offline" });
+      await writeHeartbeat("offline");
     } catch (err) {
       console.error("[bridge] Shutdown status write failed:", (err as Error).message);
     }

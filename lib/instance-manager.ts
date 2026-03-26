@@ -237,6 +237,8 @@ export class InstanceManager extends EventEmitter {
 
     const assistantMsgId = assistantMsg?.id;
     let fullText = "";
+    let currentMsgId = assistantMsgId;
+    let turnText = "";
 
     try {
       // Dynamic import for the SDK (may not be available in all environments)
@@ -345,22 +347,47 @@ export class InstanceManager extends EventEmitter {
         if (event.type === "stream_event") {
           const streamEvent = event.event;
 
-          if (streamEvent?.type === "content_block_delta") {
+          if (streamEvent?.type === "message_start") {
+            // New assistant turn — if we already have text, finalize previous message
+            // and create a new one for this turn
+            if (turnText && currentMsgId) {
+              await this.supabase
+                .from("chat_messages")
+                .update({ content: turnText, status: "done" })
+                .eq("id", currentMsgId);
+            }
+
+            // Create new message for this turn
+            const { data: newMsg } = await this.supabase
+              .from("chat_messages")
+              .insert({
+                instance_id: instanceId,
+                role: "assistant",
+                content: "",
+                status: "streaming",
+              })
+              .select()
+              .single();
+
+            if (newMsg) {
+              currentMsgId = newMsg.id;
+              turnText = "";
+            }
+          } else if (streamEvent?.type === "content_block_delta") {
             const delta = streamEvent.delta;
             if (delta?.type === "text_delta" && delta.text) {
               fullText += delta.text;
+              turnText += delta.text;
               this.emit("text_delta", instanceId, delta.text);
 
-              // Update assistant message periodically (configurable via STREAMING_DEBOUNCE_CHARS)
-              // Lower default to 50 chars for more responsive streaming
+              // Update assistant message periodically
               const debounceChars = parseInt(process.env.STREAMING_DEBOUNCE_CHARS || "50", 10);
-              // Always update on first chunk, then debounce subsequent updates
-              const isFirstUpdate = fullText.length === delta.text.length;
-              if (isFirstUpdate || fullText.length % debounceChars < delta.text.length) {
+              const isFirstUpdate = turnText.length === delta.text.length;
+              if (isFirstUpdate || turnText.length % debounceChars < delta.text.length) {
                 await this.supabase
                   .from("chat_messages")
-                  .update({ content: fullText, status: "streaming" })
-                  .eq("id", assistantMsgId);
+                  .update({ content: turnText, status: "streaming" })
+                  .eq("id", currentMsgId);
               }
             }
           } else if (streamEvent?.type === "content_block_start") {
@@ -410,27 +437,27 @@ export class InstanceManager extends EventEmitter {
         retryable,
       });
 
-      // Mark assistant message as error so the phone UI can show it
-      if (assistantMsgId) {
+      // Mark current assistant message as error so the phone UI can show it
+      if (currentMsgId) {
         await this.supabase
           .from("chat_messages")
           .update({
-            content: fullText || `Error: ${errorMsg}`,
+            content: turnText || fullText || `Error: ${errorMsg}`,
             status: "error",
           })
-          .eq("id", assistantMsgId);
+          .eq("id", currentMsgId);
       }
       await this.updateStatus(instanceId, "error", errorMsg);
     } finally {
-      // Finalize assistant message (only if not already handled by error path)
-      if (assistantMsgId && fullText) {
+      // Finalize the current turn's message
+      if (currentMsgId && turnText) {
         await this.supabase
           .from("chat_messages")
           .update({
-            content: fullText,
+            content: turnText,
             status: "done",
           })
-          .eq("id", assistantMsgId);
+          .eq("id", currentMsgId);
       }
 
       this.activeQueries.delete(instanceId);

@@ -14,13 +14,13 @@ async function authenticate(req: NextRequest) {
   return getSessionFromCookies(cookieHeader);
 }
 
-// Verify instance exists (single-user: no ownership check)
-async function verifyInstance(instanceId: string) {
+// Verify instance exists and get status (single-user: no ownership check)
+async function getInstanceStatus(instanceId: string): Promise<{ exists: boolean; status?: string }> {
   const { data } = await (supabase.from("instances") as any)
-    .select("id")
+    .select("id, status")
     .eq("id", instanceId)
     .maybeSingle();
-  return !!data;
+  return { exists: !!data, status: data?.status };
 }
 
 // ---- GET: Fetch messages ----
@@ -33,7 +33,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
-  if (!(await verifyInstance(id))) {
+  const { exists } = await getInstanceStatus(id);
+  if (!exists) {
     return NextResponse.json(
       { error: "Instance not found" },
       { status: 404 },
@@ -77,7 +78,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
-  if (!(await verifyInstance(id))) {
+  const { exists, status: currentStatus } = await getInstanceStatus(id);
+  if (!exists) {
     return NextResponse.json(
       { error: "Instance not found" },
       { status: 404 },
@@ -115,15 +117,19 @@ export async function POST(req: NextRequest, context: RouteContext) {
       );
     }
 
-    // Update instance status to indicate activity
-    await (supabase.from("instances") as any)
-      .update({
-        status: "queued",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
+    // Only update status to "queued" if instance is idle/stopped
+    // If already running or queued, leave status alone (message will be processed in order)
+    const isAlreadyBusy = currentStatus === "running" || currentStatus === "queued";
+    if (!isAlreadyBusy) {
+      await (supabase.from("instances") as any)
+        .update({
+          status: "queued",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+    }
 
-    return NextResponse.json({ message: data }, { status: 201 });
+    return NextResponse.json({ message: data, queued: isAlreadyBusy }, { status: 201 });
   } catch (err) {
     console.error("[messages/POST] Unexpected error:", err);
     return NextResponse.json(

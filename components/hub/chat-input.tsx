@@ -32,7 +32,9 @@ export function ChatInput({
 
   const isRunning = instanceStatus === "running";
   const isQueued = instanceStatus === "queued";
-  const canSend = text.trim().length > 0 && !isQueued;
+  const isBusy = isRunning || isQueued;
+  // Allow sending messages even when busy - they will be queued
+  const canSend = text.trim().length > 0;
 
   // Auto-resize textarea
   const adjustHeight = useCallback(() => {
@@ -58,7 +60,7 @@ export function ChatInput({
 
   const handleSend = () => {
     const trimmed = text.trim().replace(/\0/g, "");
-    if (!trimmed || trimmed.length > 50000 || isQueued) return;
+    if (!trimmed || trimmed.length > 50000) return;
 
     setSendStatus("sending");
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
@@ -80,11 +82,11 @@ export function ChatInput({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (isRunning) {
-        onInterrupt();
-      } else {
-        handleSend();
-      }
+      // Always send message (will be queued if busy)
+      handleSend();
+    } else if (e.key === "Escape" && isRunning) {
+      // Escape to interrupt when running
+      onInterrupt();
     }
   };
 
@@ -165,7 +167,7 @@ export function ChatInput({
         <button
           type="button"
           onClick={toggleRecording}
-          disabled={disabled || isQueued || transcribing}
+          disabled={disabled || transcribing}
           className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-colors focus:outline-none ${
             recording
               ? "bg-red-600 text-white animate-pulse"
@@ -205,19 +207,18 @@ export function ChatInput({
                 ? "Transcribing..."
                 : recording
                   ? "Recording... tap mic to stop"
-                  : isQueued
-                    ? "Queued..."
-                    : isRunning
-                      ? "Press Enter to interrupt, or type..."
-                      : "Message Claude..."
+                  : isBusy
+                    ? "Type to queue another message..."
+                    : "Message Claude..."
             }
-            disabled={disabled || isQueued}
+            disabled={disabled}
             rows={1}
             className="w-full bg-hub-surface-2 border border-hub-border rounded-xl px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 disabled:opacity-50 transition-colors"
           />
         </div>
 
-        {isRunning ? (
+        {/* Interrupt button - shown when running */}
+        {isBusy && (
           <button
             type="button"
             onClick={onInterrupt}
@@ -228,19 +229,20 @@ export function ChatInput({
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={!canSend}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 disabled:bg-hub-surface-2 disabled:text-hub-text-muted/30 transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
-            aria-label="Send"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-          </button>
         )}
+
+        {/* Send button - always available */}
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={!canSend}
+          className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 disabled:bg-hub-surface-2 disabled:text-hub-text-muted/30 transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
+          aria-label={isBusy ? "Queue message" : "Send"}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+          </svg>
+        </button>
       </div>
 
       {/* Status indicators */}

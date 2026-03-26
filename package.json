@@ -2,6 +2,8 @@
   "name": "claude-hub",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
+  "author": "Samuel Hootini",
   "scripts": {
     "dev": "node server.ts",
     "build": "next build",

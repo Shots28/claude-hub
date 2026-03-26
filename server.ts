@@ -153,9 +153,17 @@ async function initBridge(
   const manager = new InstanceManager();
 
   const { createClient } = await import("@supabase/supabase-js");
+  console.log(`[bridge] Connecting to Supabase: ${process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(-30)}`);
   const bridgeSupabase: any = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    }
   );
 
   // --- Push notification helper ---

@@ -98,9 +98,10 @@ export function MessageList({
     );
   }
 
-  // Build message list with date separators
+  // Build message list with date separators and turn separators
   const elements: React.ReactNode[] = [];
   let lastDateKey = "";
+  let prevMessage: DbMessage | null = null;
 
   for (const msg of messages) {
     const dateKey = getDateKey(msg.created_at);
@@ -113,20 +114,38 @@ export function MessageList({
       );
       lastDateKey = dateKey;
     }
+
+    // Add a turn separator between consecutive assistant messages (different turns)
+    // or when transitioning from tool block back to assistant message
+    const isNewTurn =
+      prevMessage &&
+      msg.role === "assistant" &&
+      !msg.tool_name &&
+      (prevMessage.role === "assistant" || prevMessage.tool_name);
+
+    if (isNewTurn) {
+      elements.push(
+        <div key={`turn-sep-${msg.id}`} className="h-3" aria-hidden="true" />
+      );
+    }
+
     elements.push(
       <MessageBubble
         key={msg.id}
         message={msg}
         isStreaming={msg.id === streamingMessageId}
+        isFirstInTurn={!prevMessage || prevMessage.role !== msg.role || !!prevMessage.tool_name !== !!msg.tool_name}
       />
     );
+
+    prevMessage = msg;
   }
 
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-3"
+      className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-4"
     >
       {elements}
       <div ref={bottomRef} />

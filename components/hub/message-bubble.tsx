@@ -11,11 +11,13 @@ import type { DbMessage } from "@/lib/types";
 interface MessageBubbleProps {
   message: DbMessage;
   isStreaming?: boolean;
+  isFirstInTurn?: boolean;
 }
 
 export function MessageBubble({
   message,
   isStreaming = false,
+  isFirstInTurn = false,
 }: MessageBubbleProps) {
   const [showCopy, setShowCopy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -34,7 +36,7 @@ export function MessageBubble({
     }
   };
 
-  // Tool call blocks are rendered inline
+  // Tool call blocks are rendered inline with better spacing
   if (isTool) {
     let parsedInput: Record<string, unknown> = {};
     try {
@@ -44,7 +46,7 @@ export function MessageBubble({
     }
 
     return (
-      <div className="px-4 py-1.5">
+      <div className="px-4 py-2">
         <ToolCallBlock
           toolName={message.tool_name!}
           toolId={message.tool_id ?? ""}
@@ -74,9 +76,12 @@ export function MessageBubble({
     minute: "2-digit",
   });
 
+  // Add extra top margin for first message in a new turn (except user messages)
+  const turnSpacing = isFirstInTurn && !isUser ? "mt-2" : "";
+
   return (
     <div
-      className={`px-4 py-2 flex ${isUser ? "justify-end" : "justify-start"}`}
+      className={`px-4 py-2 flex ${isUser ? "justify-end" : "justify-start"} ${turnSpacing}`}
       onMouseEnter={() => setShowCopy(true)}
       onMouseLeave={() => setShowCopy(false)}
     >

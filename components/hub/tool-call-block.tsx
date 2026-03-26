@@ -30,7 +30,7 @@ export function ToolCallBlock({
 
   return (
     <div
-      className={`my-1.5 rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}
+      className={`my-2.5 rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}
     >
       <button
         type="button"

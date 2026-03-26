@@ -126,7 +126,7 @@ export function MessageList({
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-1"
+      className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-3"
     >
       {elements}
       <div ref={bottomRef} />

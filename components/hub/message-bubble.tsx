@@ -44,7 +44,7 @@ export function MessageBubble({
     }
 
     return (
-      <div className="px-4 py-0.5">
+      <div className="px-4 py-1.5">
         <ToolCallBlock
           toolName={message.tool_name!}
           toolId={message.tool_id ?? ""}
@@ -76,7 +76,7 @@ export function MessageBubble({
 
   return (
     <div
-      className={`px-4 py-1 flex ${isUser ? "justify-end" : "justify-start"}`}
+      className={`px-4 py-2 flex ${isUser ? "justify-end" : "justify-start"}`}
       onMouseEnter={() => setShowCopy(true)}
       onMouseLeave={() => setShowCopy(false)}
     >

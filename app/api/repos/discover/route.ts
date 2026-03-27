@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/discovered_repos?select=name,path&order=name.asc`,
+      `${supabaseUrl}/rest/v1/discovered_repos?select=name,path,is_git_repo&order=is_git_repo.desc,name.asc`,
       {
         headers: {
           apikey: supabaseKey,

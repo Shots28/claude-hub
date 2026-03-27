@@ -23,13 +23,16 @@ function MobileActionMenu({
   onDelete,
   onRename,
   onClose,
+  triggerRef,
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
   onRename: (id: string) => void;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -41,10 +44,28 @@ function MobileActionMenu({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
+  // Calculate menu position using fixed positioning relative to viewport
+  useEffect(() => {
+    if (triggerRef?.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const menuHeight = 90;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const positionAbove = spaceBelow < menuHeight + 20;
+
+      setMenuStyle({
+        position: 'fixed',
+        right: window.innerWidth - rect.right,
+        top: positionAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
+        zIndex: 9999,
+      });
+    }
+  }, [triggerRef]);
+
   return (
     <div
       ref={menuRef}
-      className="absolute right-2 top-full mt-1 z-[60] w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
+      style={menuStyle}
+      className="w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
     >
       <button
         type="button"
@@ -89,6 +110,7 @@ export function InstanceListMobile({
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const menuTriggerRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
 
   const handleDelete = async (id: string) => {
     try {
@@ -284,6 +306,7 @@ export function InstanceListMobile({
 
                         {/* More actions button */}
                         <button
+                          ref={(el) => { menuTriggerRefs.current.set(inst.id, el); }}
                           type="button"
                           onClick={(e) => {
                             e.preventDefault();
@@ -307,6 +330,7 @@ export function InstanceListMobile({
                           onDelete={handleDelete}
                           onRename={handleRename}
                           onClose={() => setMenuOpenId(null)}
+                          triggerRef={{ current: menuTriggerRefs.current.get(inst.id) ?? null }}
                         />
                       )}
                     </div>

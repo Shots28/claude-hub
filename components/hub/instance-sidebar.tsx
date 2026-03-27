@@ -21,13 +21,16 @@ function InstanceContextMenu({
   onDelete,
   onRename,
   onClose,
+  triggerRef,
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
   onRename: (id: string) => void;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -39,10 +42,28 @@ function InstanceContextMenu({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
+  // Calculate menu position using fixed positioning relative to viewport
+  useEffect(() => {
+    if (triggerRef?.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const menuHeight = 80;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const positionAbove = spaceBelow < menuHeight + 20;
+
+      setMenuStyle({
+        position: 'fixed',
+        right: window.innerWidth - rect.right,
+        top: positionAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
+        zIndex: 9999,
+      });
+    }
+  }, [triggerRef]);
+
   return (
     <div
       ref={menuRef}
-      className="absolute right-0 top-full mt-1 z-50 w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
+      style={menuStyle}
+      className="w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
     >
       <button
         type="button"
@@ -84,6 +105,7 @@ export function InstanceSidebar({
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const menuTriggerRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
 
   const filteredInstances = useMemo(() => {
     if (!search.trim()) return instances;
@@ -253,6 +275,7 @@ export function InstanceSidebar({
 
                       {/* Context menu trigger */}
                       <button
+                        ref={(el) => { menuTriggerRefs.current.set(inst.id, el); }}
                         type="button"
                         onClick={(e) => {
                           e.preventDefault();
@@ -275,6 +298,7 @@ export function InstanceSidebar({
                           onDelete={handleDelete}
                           onRename={handleRename}
                           onClose={() => setMenuOpenId(null)}
+                          triggerRef={{ current: menuTriggerRefs.current.get(inst.id) ?? null }}
                         />
                       )}
                     </div>

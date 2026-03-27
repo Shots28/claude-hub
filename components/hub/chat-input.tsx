@@ -68,9 +68,9 @@ export function ChatInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Shift+Enter or Cmd/Ctrl+Enter to send, plain Enter for new line
+    if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      // Always send message (will be queued if busy)
       handleSend();
     } else if (e.key === "Escape" && isRunning) {
       // Escape to interrupt when running

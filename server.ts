@@ -54,9 +54,9 @@ function expandHome(p: string): string {
   return p;
 }
 
-async function scanRepos(): Promise<{ name: string; path: string }[]> {
+async function scanFolders(): Promise<{ name: string; path: string; is_git_repo: boolean }[]> {
   const seen = new Set<string>();
-  const repos: { name: string; path: string }[] = [];
+  const folders: { name: string; path: string; is_git_repo: boolean }[] = [];
 
   for (const dir of SCAN_DIRS) {
     const expanded = expandHome(dir);
@@ -65,22 +65,30 @@ async function scanRepos(): Promise<{ name: string; path: string }[]> {
       for (const e of entries) {
         if (!e.isDirectory() || e.name.startsWith(".")) continue;
         const fullPath = join(expanded, e.name);
+        if (seen.has(fullPath)) continue;
+        seen.add(fullPath);
+
+        // Check if it's a git repo
+        let isGitRepo = false;
         try {
           await access(join(fullPath, ".git"));
-          if (!seen.has(fullPath)) {
-            seen.add(fullPath);
-            repos.push({ name: e.name, path: fullPath });
-          }
+          isGitRepo = true;
         } catch {}
+
+        folders.push({ name: e.name, path: fullPath, is_git_repo: isGitRepo });
       }
     } catch {}
   }
 
-  repos.sort((a, b) => a.name.localeCompare(b.name));
-  return repos;
+  // Sort: git repos first, then alphabetically within each group
+  folders.sort((a, b) => {
+    if (a.is_git_repo !== b.is_git_repo) return a.is_git_repo ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return folders;
 }
 
-async function syncReposToSupabase(repos: { name: string; path: string }[]): Promise<void> {
+async function syncFoldersToSupabase(folders: { name: string; path: string; is_git_repo: boolean }[]): Promise<void> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseKey) return;
@@ -95,17 +103,18 @@ async function syncReposToSupabase(repos: { name: string; path: string }[]): Pro
 
   await fetch(`${restBase}?path=neq.`, { method: "DELETE", headers });
 
-  if (repos.length > 0) {
+  if (folders.length > 0) {
     const res = await fetch(restBase, {
       method: "POST",
       headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(repos),
+      body: JSON.stringify(folders),
     });
     if (!res.ok) {
       const text = await res.text();
-      console.error("[repo-scanner] Sync failed:", text);
+      console.error("[folder-scanner] Sync failed:", text);
     } else {
-      console.log(`[repo-scanner] Synced ${repos.length} repos to Supabase`);
+      const gitCount = folders.filter(f => f.is_git_repo).length;
+      console.log(`[folder-scanner] Synced ${folders.length} folders (${gitCount} git repos) to Supabase`);
     }
   }
 }
@@ -116,7 +125,7 @@ async function syncReposToSupabase(repos: { name: string; path: string }[]): Pro
 
 async function initBridge(
   server: ReturnType<typeof createServer>,
-  repos: { name: string; path: string }[]
+  folders: { name: string; path: string; is_git_repo: boolean }[]
 ) {
   // --- Env validation ---
   const REQUIRED_ENV = ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "JWT_SECRET"];
@@ -239,7 +248,7 @@ async function initBridge(
   });
 
   // --- Build local instance ownership cache ---
-  const localRepoPaths = new Set(repos.map((r) => r.path));
+  const localRepoPaths = new Set(folders.map((f) => f.path));
   const localInstanceIds = new Set<string>();
 
   let refreshTimer: NodeJS.Timeout | null = null;
@@ -267,6 +276,7 @@ async function initBridge(
   await refreshLocalInstanceCache();
 
   // Refresh cache when instances are created or deleted
+  // Also listen for status changes to handle user-initiated interrupts
   bridgeSupabase
     .channel("bridge-instances")
     .on("postgres_changes", {
@@ -279,6 +289,18 @@ async function initBridge(
       schema: "public",
       table: "instances",
     }, debouncedRefresh)
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "instances",
+    }, async (payload: any) => {
+      const { id, status } = payload.new;
+      // If user set status to "idle" via the interrupt API, abort the running query
+      if (status === "idle" && localInstanceIds.has(id) && manager.isRunning(id)) {
+        console.log(`[bridge] User interrupted instance ${id}, aborting...`);
+        await manager.interrupt(id);
+      }
+    })
     .subscribe();
 
   // --- Reset stale "running" instances (scoped to local repos) ---
@@ -727,14 +749,14 @@ app.prepare().then(() => {
       `[server] Claude Hub running on http://localhost:${port} (${dev ? "development" : "production"})`
     );
 
-    // Scan repos, sync to Supabase, then start bridge
+    // Scan folders, sync to Supabase, then start bridge
     (async () => {
       try {
-        const repos = await scanRepos();
-        console.log(`[repo-scanner] Found ${repos.length} local repos`);
+        const folders = await scanFolders();
+        console.log(`[folder-scanner] Found ${folders.length} local folders`);
 
-        await syncReposToSupabase(repos);
-        await initBridge(server, repos);
+        await syncFoldersToSupabase(folders);
+        await initBridge(server, folders);
       } catch (err) {
         console.error("[startup] Fatal error:", err);
         process.exit(1);

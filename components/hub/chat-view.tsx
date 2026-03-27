@@ -3,7 +3,7 @@
 // ChatView — Container for the chat experience for a single instance
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 import { PermissionBanner } from "./permission-banner";
@@ -19,8 +19,16 @@ import type {
   DbInstance,
   DbPendingPermission,
   InstanceStatus,
+  PermissionMode,
   UiMessage,
 } from "@/lib/types";
+
+const PERMISSION_MODES: { value: PermissionMode; label: string; short: string }[] = [
+  { value: "bypassPermissions", label: "Bypass all permissions", short: "Bypass" },
+  { value: "acceptEdits", label: "Auto-accept edits", short: "Auto-edit" },
+  { value: "plan", label: "Plan mode", short: "Plan" },
+  { value: "default", label: "Ask for approval", short: "Ask" },
+];
 
 interface ChatViewProps {
   instance: DbInstance;
@@ -89,6 +97,9 @@ export function ChatView({
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clearingSession, setClearingSession] = useState(false);
+  const [showModeMenu, setShowModeMenu] = useState(false);
+  const [updatingMode, setUpdatingMode] = useState(false);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   const bridgeStatus = useBridgeStatus();
 
   // File viewer / plan viewer / file activity state
@@ -146,6 +157,36 @@ export function ChatView({
     onInterrupt(instance.id);
   }, [instance.id, onInterrupt]);
 
+  // Close mode menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modeMenuRef.current && !modeMenuRef.current.contains(e.target as Node)) {
+        setShowModeMenu(false);
+      }
+    };
+    if (showModeMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showModeMenu]);
+
+  // Change permission mode
+  const handleModeChange = useCallback(async (mode: PermissionMode) => {
+    setUpdatingMode(true);
+    setShowModeMenu(false);
+    try {
+      await fetch(`/api/instances/${instance.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissionMode: mode }),
+      });
+    } catch {
+      // silently fail
+    } finally {
+      setUpdatingMode(false);
+    }
+  }, [instance.id]);
+
   // New Chat: clears the session_id so the next message starts a fresh Claude
   // conversation. Previous messages remain visible (no visual separator needed —
   // the user explicitly clicked "New Chat"). A system-message separator is not
@@ -199,13 +240,47 @@ export function ChatView({
                 }`}
                 title={`Bridge: ${bridgeStatus.health}`}
               />
-              <span className="text-xs text-hub-text-muted ml-2">
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-xs text-hub-text-muted truncate">
+                {instance.repo_path}
+              </p>
+              <span className="text-hub-text-muted/30">|</span>
+              <span className="text-xs text-hub-text-muted">
                 {instance.model || "sonnet"}
               </span>
+              <span className="text-hub-text-muted/30">|</span>
+              {/* Mode switcher */}
+              <div className="relative" ref={modeMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowModeMenu(!showModeMenu)}
+                  disabled={updatingMode}
+                  className="text-xs text-hub-accent hover:text-hub-accent-hover disabled:opacity-50 transition-colors"
+                >
+                  {updatingMode ? "..." : PERMISSION_MODES.find(m => m.value === instance.permission_mode)?.short || "Mode"}
+                </button>
+                {showModeMenu && (
+                  <div className="absolute left-0 top-full mt-1 z-50 w-48 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1">
+                    {PERMISSION_MODES.map((mode) => (
+                      <button
+                        key={mode.value}
+                        type="button"
+                        onClick={() => handleModeChange(mode.value)}
+                        className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                          instance.permission_mode === mode.value
+                            ? "bg-hub-accent/10 text-hub-accent"
+                            : "text-hub-text hover:bg-hub-surface"
+                        }`}
+                      >
+                        <div className="font-medium">{mode.short}</div>
+                        <div className="text-hub-text-muted text-[10px]">{mode.label}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <p className="text-xs text-hub-text-muted truncate mt-0.5">
-              {instance.repo_path}
-            </p>
           </div>
 
           <div className="flex items-center gap-1 flex-shrink-0">

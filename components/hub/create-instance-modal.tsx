@@ -1,7 +1,8 @@
 "use client";
 // ---------------------------------------------------------------------------
 // CreateInstanceModal — Modal dialog for creating a new instance
-// Auto-discovers local git repos for easy selection
+// Auto-discovers local folders (both git repos and regular folders)
+// Also supports creating new folders and manual path entry
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
@@ -14,9 +15,10 @@ interface CreateInstanceModalProps {
   existingNames?: string[];
 }
 
-interface DiscoveredRepo {
+interface DiscoveredFolder {
   name: string;
   path: string;
+  is_git_repo?: boolean;
 }
 
 export function CreateInstanceModal({
@@ -34,47 +36,90 @@ export function CreateInstanceModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Repo discovery state
-  const [repos, setRepos] = useState<DiscoveredRepo[]>([]);
-  const [reposLoading, setReposLoading] = useState(false);
-  const [reposError, setReposError] = useState<string | null>(null);
+  // Folder discovery state
+  const [folders, setFolders] = useState<DiscoveredFolder[]>([]);
+  const [foldersLoading, setFoldersLoading] = useState(false);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showManual, setShowManual] = useState(false);
+  const [filterGitOnly, setFilterGitOnly] = useState(false);
 
-  // Fetch discovered repos when modal opens
+  // Folder creation state
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderParent, setNewFolderParent] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [createFolderError, setCreateFolderError] = useState<string | null>(null);
+
+  // Function to fetch folders
+  const fetchFolders = useCallback(async () => {
+    setFoldersLoading(true);
+    setFoldersError(null);
+    try {
+      const res = await fetch("/api/repos/discover", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to discover folders");
+      const data = await res.json();
+      setFolders(data.repos ?? []);
+    } catch {
+      setFoldersError("Couldn't scan for folders");
+    } finally {
+      setFoldersLoading(false);
+    }
+  }, []);
+
+  // Fetch discovered folders when modal opens
   useEffect(() => {
     if (!open) return;
-    let cancelled = false;
+    fetchFolders();
+  }, [open, fetchFolders]);
 
-    async function fetchRepos() {
-      setReposLoading(true);
-      setReposError(null);
-      try {
-        const res = await fetch("/api/repos/discover", {
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error("Failed to discover repos");
+  // Create new folder handler
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim() || !newFolderParent.trim()) return;
+
+    setCreatingFolder(true);
+    setCreateFolderError(null);
+
+    try {
+      const res = await fetch("/api/repos/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentPath: newFolderParent.trim(),
+          folderName: newFolderName.trim(),
+        }),
+      });
+
+      if (!res.ok) {
         const data = await res.json();
-        if (!cancelled) {
-          setRepos(data.repos ?? []);
-        }
-      } catch {
-        if (!cancelled) {
-          setReposError("Couldn't scan for repos");
-        }
-      } finally {
-        if (!cancelled) setReposLoading(false);
+        setCreateFolderError(data.error || "Failed to create folder");
+        return;
       }
+
+      const data = await res.json();
+
+      // Select the newly created folder
+      selectFolder(data.folder);
+
+      // Reset create folder state
+      setShowCreateFolder(false);
+      setNewFolderName("");
+      setNewFolderParent("");
+
+      // Refresh the folder list
+      fetchFolders();
+    } catch {
+      setCreateFolderError("Network error. Please try again.");
+    } finally {
+      setCreatingFolder(false);
     }
+  };
 
-    fetchRepos();
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  const selectRepo = (repo: DiscoveredRepo) => {
-    let baseName = repo.name;
+  const selectFolder = (folder: DiscoveredFolder) => {
+    let baseName = folder.name;
     let finalName = baseName;
     let counter = 2;
     while (existingNames?.includes(finalName)) {
@@ -82,17 +127,20 @@ export function CreateInstanceModal({
       counter++;
     }
     setName(finalName);
-    setRepoPath(repo.path);
+    setRepoPath(folder.path);
     setSearchQuery("");
   };
 
-  const filteredRepos = searchQuery
-    ? repos.filter(
-        (r) =>
-          r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          r.path.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : repos;
+  const filteredFolders = folders.filter((f) => {
+    // Apply git filter if enabled
+    if (filterGitOnly && !f.is_git_repo) return false;
+    // Apply search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return f.name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q);
+    }
+    return true;
+  });
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -183,14 +231,14 @@ export function CreateInstanceModal({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4 overflow-y-auto">
-          {/* Repo selection */}
+          {/* Folder selection */}
           {!showManual ? (
             <div>
               <label className="block text-xs font-medium text-hub-text-muted mb-1.5">
-                Select a repository
+                Select a folder
               </label>
 
-              {/* Selected repo display */}
+              {/* Selected folder display */}
               {hasSelection ? (
                 <div className="flex items-center gap-2 bg-hub-accent/10 border border-hub-accent/30 rounded-lg px-3 py-2.5 mb-2">
                   <svg className="w-4 h-4 text-hub-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -212,43 +260,63 @@ export function CreateInstanceModal({
                 </div>
               ) : (
                 <>
-                  {/* Search / filter input */}
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search repos..."
-                    className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 mb-2"
-                  />
+                  {/* Search and filter row */}
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search folders..."
+                      className="flex-1 bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFilterGitOnly(!filterGitOnly)}
+                      className={`px-3 py-2 text-xs rounded-lg border transition-colors whitespace-nowrap ${
+                        filterGitOnly
+                          ? "bg-hub-accent/10 border-hub-accent/30 text-hub-accent"
+                          : "bg-hub-surface-2 border-hub-border text-hub-text-muted hover:border-hub-text-muted/30"
+                      }`}
+                    >
+                      Git only
+                    </button>
+                  </div>
 
-                  {/* Repo list */}
+                  {/* Folder list */}
                   <div className="border border-hub-border rounded-lg overflow-hidden max-h-48 overflow-y-auto">
-                    {reposLoading ? (
+                    {foldersLoading ? (
                       <div className="px-3 py-6 text-center text-sm text-hub-text-muted">
                         <div className="inline-block w-4 h-4 border-2 border-hub-text-muted/30 border-t-hub-accent rounded-full animate-spin mb-2" />
-                        <div>Scanning for repos...</div>
+                        <div>Scanning for folders...</div>
                       </div>
-                    ) : reposError ? (
+                    ) : foldersError ? (
                       <div className="px-3 py-4 text-center text-sm text-hub-text-muted">
-                        {reposError}
+                        {foldersError}
                       </div>
-                    ) : filteredRepos.length === 0 ? (
+                    ) : filteredFolders.length === 0 ? (
                       <div className="px-3 py-4 text-center text-sm text-hub-text-muted">
-                        {searchQuery ? "No repos match your search" : "No repos found"}
+                        {searchQuery || filterGitOnly ? "No folders match your filters" : "No folders found"}
                       </div>
                     ) : (
-                      filteredRepos.map((repo) => (
+                      filteredFolders.map((folder) => (
                         <button
-                          key={repo.path}
+                          key={folder.path}
                           type="button"
-                          onClick={() => selectRepo(repo)}
+                          onClick={() => selectFolder(folder)}
                           className="w-full text-left px-3 py-2.5 hover:bg-hub-surface-2 transition-colors border-b border-hub-border last:border-b-0 group"
                         >
-                          <div className="text-sm font-medium text-hub-text group-hover:text-hub-accent transition-colors truncate">
-                            {repo.name}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-hub-text group-hover:text-hub-accent transition-colors truncate flex-1">
+                              {folder.name}
+                            </span>
+                            {folder.is_git_repo && (
+                              <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-hub-surface border border-hub-border text-hub-text-muted">
+                                git
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-hub-text-muted font-mono truncate">
-                            {repo.path}
+                            {folder.path}
                           </div>
                         </button>
                       ))
@@ -257,14 +325,96 @@ export function CreateInstanceModal({
                 </>
               )}
 
-              {/* Manual entry toggle */}
-              <button
-                type="button"
-                onClick={() => setShowManual(true)}
-                className="mt-2 text-xs text-hub-text-muted hover:text-hub-accent transition-colors"
-              >
-                Enter path manually instead
-              </button>
+              {/* Action buttons */}
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowManual(true)}
+                  className="text-xs text-hub-text-muted hover:text-hub-accent transition-colors"
+                >
+                  Enter path manually
+                </button>
+                <span className="text-hub-text-muted/30">|</span>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateFolder(true)}
+                  className="text-xs text-hub-text-muted hover:text-hub-accent transition-colors"
+                >
+                  Create new folder
+                </button>
+              </div>
+            </div>
+          ) : showCreateFolder ? (
+            /* Create folder form */
+            <div>
+              <label className="block text-xs font-medium text-hub-text-muted mb-1.5">
+                Create a new folder
+              </label>
+
+              <div className="space-y-3">
+                <div>
+                  <label
+                    htmlFor="new-folder-parent"
+                    className="block text-[11px] text-hub-text-muted/70 mb-1"
+                  >
+                    Parent folder (e.g. ~/Projects)
+                  </label>
+                  <input
+                    id="new-folder-parent"
+                    type="text"
+                    value={newFolderParent}
+                    onChange={(e) => setNewFolderParent(e.target.value)}
+                    placeholder="~/Projects"
+                    className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="new-folder-name"
+                    className="block text-[11px] text-hub-text-muted/70 mb-1"
+                  >
+                    Folder name
+                  </label>
+                  <input
+                    id="new-folder-name"
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="my-new-project"
+                    className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50"
+                  />
+                </div>
+
+                {createFolderError && (
+                  <div className="text-xs text-red-400 bg-red-500/10 rounded-lg px-2.5 py-1.5">
+                    {createFolderError}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCreateFolder}
+                    disabled={creatingFolder || !newFolderName.trim() || !newFolderParent.trim()}
+                    className="px-3 py-1.5 text-xs font-medium bg-hub-accent hover:bg-hub-accent-hover text-white rounded-lg disabled:opacity-50 transition-colors"
+                  >
+                    {creatingFolder ? "Creating..." : "Create Folder"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCreateFolder(false);
+                      setNewFolderName("");
+                      setNewFolderParent("");
+                      setCreateFolderError(null);
+                    }}
+                    className="px-3 py-1.5 text-xs text-hub-text-muted hover:text-hub-text transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -287,20 +437,20 @@ export function CreateInstanceModal({
                 />
               </div>
 
-              {/* Manual repo path input */}
+              {/* Manual folder path input */}
               <div>
                 <label
                   htmlFor="instance-repo"
                   className="block text-xs font-medium text-hub-text-muted mb-1.5"
                 >
-                  Repository path
+                  Folder path
                 </label>
                 <input
                   id="instance-repo"
                   type="text"
                   value={repoPath}
                   onChange={(e) => setRepoPath(e.target.value)}
-                  placeholder="/home/user/projects/my-repo"
+                  placeholder="/home/user/projects/my-folder"
                   required
                   className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text placeholder-hub-text-muted/50 focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 font-mono"
                 />
@@ -312,7 +462,7 @@ export function CreateInstanceModal({
                 onClick={() => setShowManual(false)}
                 className="text-xs text-hub-text-muted hover:text-hub-accent transition-colors"
               >
-                Pick from discovered repos instead
+                Pick from discovered folders instead
               </button>
             </>
           )}

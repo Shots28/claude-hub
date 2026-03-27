@@ -226,7 +226,7 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
       ),
       color: "text-emerald-400",
       bgColor: "bg-emerald-500/10",
-      details: null, // No details to show
+      details: undefined, // No details to show
     };
   }
 
@@ -249,7 +249,7 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
       ),
       color: "text-amber-400",
       bgColor: "bg-amber-500/10",
-      details: Object.keys(input).length > 0 ? input : null,
+      details: Object.keys(input).length > 0 ? input : undefined,
     };
   }
 
@@ -266,7 +266,7 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
       ),
       color: "text-blue-400",
       bgColor: "bg-blue-500/10",
-      details: null,
+      details: undefined,
     };
   }
 
@@ -299,7 +299,7 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
     ),
     color: "text-hub-text-muted",
     bgColor: "bg-hub-surface-2",
-    details: Object.keys(input).length > 0 ? input : null, // Don't show empty details
+    details: Object.keys(input).length > 0 ? input : undefined, // Don't show empty details
   };
 }
 

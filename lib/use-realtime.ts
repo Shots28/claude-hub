@@ -349,6 +349,7 @@ export function useRealtime(): RealtimeState {
       if (document.hidden) return;
       console.log("[realtime] App foregrounded — refreshing data");
       refreshInstances();
+      refreshPermissions();
       if (activeInstanceRef.current) {
         loadMessages(activeInstanceRef.current);
       }
@@ -359,6 +360,7 @@ export function useRealtime(): RealtimeState {
 
     // Initial data fetch
     refreshInstances();
+    refreshPermissions();
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -368,7 +370,7 @@ export function useRealtime(): RealtimeState {
       pollingActiveRef.current = false;
       if (pollIntervalRef.current) clearTimeout(pollIntervalRef.current);
     };
-  }, [refreshInstances, loadMessages, cleanStaleOptimistic]);
+  }, [refreshInstances, refreshPermissions, loadMessages, cleanStaleOptimistic]);
 
   // -- Actions --
 

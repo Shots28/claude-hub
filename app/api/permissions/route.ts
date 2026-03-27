@@ -19,14 +19,25 @@ export async function GET(req: NextRequest) {
       .from("permission_requests")
       .select("*")
       .eq("status", "pending")
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false });
 
     if (error) {
       console.error("[permissions/GET] DB error:", error);
       return NextResponse.json({ error: "Database error" }, { status: 500 });
     }
 
-    return NextResponse.json({ permissions: data ?? [] }, { status: 200 });
+    // Transform to match DbPendingPermission format expected by frontend
+    const permissions = (data ?? []).map((p: any) => ({
+      id: p.id,
+      instance_id: p.instance_id,
+      tool_name: p.tool_name,
+      input: p.tool_input,
+      status: p.status,
+      requested_at: p.created_at,
+      timeout_at: p.timeout_at,
+    }));
+
+    return NextResponse.json({ permissions }, { status: 200 });
   } catch (err) {
     console.error("[permissions/GET] Unexpected error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

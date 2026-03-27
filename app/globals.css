@@ -14,6 +14,17 @@
   --color-hub-error: #ef4444;
 }
 
+/* Eliminate 300ms tap delay on mobile - instant response */
+button, a, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ensure buttons respond immediately */
+* {
+  -webkit-touch-callout: none;
+}
+
 /* Smooth scrolling for chat */
 .scroll-smooth-chat {
   scroll-behavior: smooth;

@@ -209,14 +209,15 @@ export function InstanceListMobile({
     }
   }, [draggingId, localOrder, saveOrder]);
 
-  // Global event listeners for drag
+  // Global event listeners for drag - only when actively dragging
   useEffect(() => {
     if (!draggingId) return;
 
     const onMove = (e: TouchEvent | MouseEvent) => handleDragMove(e);
     const onEnd = () => handleDragEnd();
 
-    document.addEventListener("touchmove", onMove, { passive: false });
+    // Use passive listeners to not block the main thread
+    document.addEventListener("touchmove", onMove, { passive: true });
     document.addEventListener("mousemove", onMove);
     document.addEventListener("touchend", onEnd);
     document.addEventListener("mouseup", onEnd);

@@ -108,11 +108,29 @@ For phone access outside your local network:
 
 ### Creating an instance
 
-Tap **New** (mobile) or use the sidebar (desktop). Select a discovered repo, choose a permission mode and model, then create. The bridge auto-discovers repos from common directories (`~/Projects`, `~/Developer`, `~/code`, etc.).
+Tap **New** (mobile) or use the sidebar (desktop). Select a discovered repo and create — the instance uses sensible defaults:
+- **Permission mode:** `bypassPermissions` (full autonomy)
+- **Model:** `opus` (most capable)
+- **Extended thinking:** enabled
+
+The bridge auto-discovers repos from common directories (`~/Projects`, `~/Developer`, `~/code`, etc.). You can also enter a path manually or create a new folder directly from the modal.
 
 ### Sending messages
 
 Type your message or use voice input (requires `OPENAI_API_KEY`). Messages relay through Supabase to the local bridge. Check the bridge status indicator in Settings to confirm the bridge is online.
+
+### Full-page chats view
+
+Navigate to `/chats` for a Slack-like full-page experience. The left panel shows all your instances grouped by repository, and the right panel displays the active chat. Click any instance to switch conversations instantly.
+
+### Task panel
+
+Click the **Tasks** button in the chat header to open the task panel. Use it to:
+- Track ideas and work items
+- Push tasks directly to the active chat as messages
+- Mark tasks complete, edit, copy, or delete them
+
+Tasks are stored locally in your browser (localStorage) and persist across sessions.
 
 ### Permission requests
 
@@ -216,6 +234,7 @@ middleware.ts          # Edge auth middleware
 app/
   (auth)/login/        # Login page
   (hub)/               # Hub layout + pages (instances, settings)
+  (hub)/chats/         # Full-page Slack-like chats view
   api/auth/            # Login, setup, logout, check, reset
   api/instances/       # CRUD, messages, interrupt, sessions, cleanup
   api/permissions/     # Permission resolution
@@ -225,6 +244,10 @@ app/
   api/transcribe/      # Voice-to-text
 lib/                   # Core business logic (instance-manager, auth, types, etc.)
 components/hub/        # Chat UI components
+  task-panel.tsx       # Task/todo panel with localStorage persistence
+  chat-view.tsx        # Main chat interface
+  activity-item.tsx    # Tool call activity display
+  create-instance-modal.tsx  # Simplified instance creation
 supabase/migrations/   # 8 SQL migration files
 scripts/backup.sh      # Backup script
 ```

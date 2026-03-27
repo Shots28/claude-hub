@@ -78,6 +78,7 @@ app/
     layout.tsx                     # Hub layout (sidebar + bottom nav + realtime provider)
     page.tsx                       # Home: redirect to first instance or empty state
     instances/[id]/page.tsx        # Chat page for a specific instance
+    chats/page.tsx                 # Full-page Slack-like chats view
     settings/page.tsx              # Bridge status, logout, about
   api/
     auth/
@@ -114,13 +115,15 @@ lib/
 
 components/
   hub/
-    chat-view.tsx                 # Main chat UI container
+    chat-view.tsx                 # Main chat UI container (includes TaskPanel integration)
     chat-input.tsx                # Message input field + send button + voice
     message-list.tsx              # Scrollable message history with auto-scroll
     message-bubble.tsx            # Individual message display (user/assistant)
+    activity-item.tsx             # Tool call activity display with special UI for ExitPlanMode/AskUserQuestion
+    task-panel.tsx                # Task/todo panel with localStorage persistence
     tool-call-block.tsx           # Tool invocation details display
     permission-banner.tsx         # Pending permission request with approve/deny
-    create-instance-modal.tsx     # Modal: create new instance (repo, mode, model)
+    create-instance-modal.tsx     # Simplified instance creation (folder selection only)
     instance-sidebar.tsx          # Desktop sidebar navigation
     instance-list-mobile.tsx      # Mobile bottom sheet navigation
     status-badge.tsx              # Instance status indicator (idle/running/error/etc.)

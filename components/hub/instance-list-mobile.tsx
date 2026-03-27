@@ -23,16 +23,32 @@ function MobileActionMenu({
   onDelete,
   onRename,
   onClose,
-  triggerRef,
+  triggerElement,
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
   onRename: (id: string) => void;
   onClose: () => void;
-  triggerRef?: React.RefObject<HTMLButtonElement | null>;
+  triggerElement: HTMLButtonElement | null;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+
+  // Calculate position immediately from the trigger element
+  const menuStyle = useMemo<React.CSSProperties>(() => {
+    if (!triggerElement) return { position: 'fixed', top: 0, right: 0, zIndex: 9999 };
+
+    const rect = triggerElement.getBoundingClientRect();
+    const menuHeight = 90;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const positionAbove = spaceBelow < menuHeight + 20;
+
+    return {
+      position: 'fixed',
+      right: window.innerWidth - rect.right,
+      top: positionAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
+      zIndex: 9999,
+    };
+  }, [triggerElement]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -43,23 +59,6 @@ function MobileActionMenu({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
-
-  // Calculate menu position using fixed positioning relative to viewport
-  useEffect(() => {
-    if (triggerRef?.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const menuHeight = 90;
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const positionAbove = spaceBelow < menuHeight + 20;
-
-      setMenuStyle({
-        position: 'fixed',
-        right: window.innerWidth - rect.right,
-        top: positionAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
-        zIndex: 9999,
-      });
-    }
-  }, [triggerRef]);
 
   return (
     <div
@@ -330,7 +329,7 @@ export function InstanceListMobile({
                           onDelete={handleDelete}
                           onRename={handleRename}
                           onClose={() => setMenuOpenId(null)}
-                          triggerRef={{ current: menuTriggerRefs.current.get(inst.id) ?? null }}
+                          triggerElement={menuTriggerRefs.current.get(inst.id) ?? null}
                         />
                       )}
                     </div>

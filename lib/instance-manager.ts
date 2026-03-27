@@ -470,11 +470,27 @@ export class InstanceManager extends EventEmitter {
             }
           } else if (streamEvent?.type === "content_block_start") {
             if (streamEvent.content_block?.type === "tool_use") {
+              const toolName = streamEvent.content_block.name;
+              const toolId = streamEvent.content_block.id;
+
               this.emit("tool_start", instanceId, {
-                toolCallId: streamEvent.content_block.id,
-                toolName: streamEvent.content_block.name,
+                toolCallId: toolId,
+                toolName,
                 toolInput: {},
               });
+
+              // Store tool call as a separate message so it shows in the chat
+              await this.supabase
+                .from("chat_messages")
+                .insert({
+                  instance_id: instanceId,
+                  role: "assistant",
+                  content: JSON.stringify(streamEvent.content_block.input || {}),
+                  tool_name: toolName,
+                  tool_id: toolId,
+                  is_error: false,
+                  status: "done",
+                });
             }
           }
         } else if (event.type === "result") {

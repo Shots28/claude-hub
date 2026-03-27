@@ -224,7 +224,10 @@ export type DbChatMessage = {
   instance_id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  status: "pending" | "streaming" | "done";
+  tool_name: string | null;
+  tool_id: string | null;
+  is_error: boolean;
+  status: "pending" | "streaming" | "done" | "error";
   created_at: string;
 };
 
@@ -364,7 +367,11 @@ export interface Database {
       };
       chat_messages: {
         Row: DbChatMessage;
-        Insert: Omit<DbChatMessage, "id" | "created_at"> & { id?: string; created_at?: string };
+        Insert: Omit<DbChatMessage, "id" | "created_at" | "is_error"> & {
+          id?: string;
+          created_at?: string;
+          is_error?: boolean;
+        };
         Update: Partial<Omit<DbChatMessage, "id">>;
         Relationships: [
           {

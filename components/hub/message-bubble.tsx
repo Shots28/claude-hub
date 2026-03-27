@@ -3,7 +3,7 @@
 // MessageBubble — Single message display
 // ---------------------------------------------------------------------------
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { StreamingText } from "./streaming-text";
 import { ToolCallBlock } from "./tool-call-block";
 import type { UiMessage } from "@/lib/types";
@@ -24,7 +24,6 @@ export function MessageBubble({
   onViewPlan,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
@@ -34,27 +33,12 @@ export function MessageBubble({
     try {
       await navigator.clipboard.writeText(message.content);
       setCopied(true);
-      // Haptic feedback if available
       if (navigator.vibrate) navigator.vibrate(50);
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard API may not be available
     }
   }, [message.content]);
-
-  // Long press handlers
-  const handleTouchStart = useCallback(() => {
-    longPressTimer.current = setTimeout(() => {
-      handleCopy();
-    }, 500); // 500ms hold to copy
-  }, [handleCopy]);
-
-  const handleTouchEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  }, []);
 
   // Tool call blocks are rendered inline with better spacing
   if (isTool) {
@@ -109,22 +93,12 @@ export function MessageBubble({
           isUser ? "order-1" : "order-1"
         }`}
       >
-        {/* Long-press to copy */}
         <div
-          className={`rounded-2xl px-4 py-2.5 select-none ${
+          className={`rounded-2xl px-4 py-2.5 ${
             isUser
               ? "bg-blue-600 text-white rounded-br-md"
               : "bg-hub-surface-2 text-hub-text rounded-bl-md"
-          } ${message.deliveryStatus === "pending" ? "animate-pulse-slow" : ""} ${
-            copied ? "ring-2 ring-emerald-400/50" : ""
-          }`}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchEnd}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            handleCopy();
-          }}
+          } ${message.deliveryStatus === "pending" ? "animate-pulse-slow" : ""}`}
         >
           {isUser ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">
@@ -138,14 +112,7 @@ export function MessageBubble({
           )}
         </div>
 
-        {/* Copied indicator */}
-        {copied && (
-          <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs px-2 py-1 rounded-full shadow-lg animate-fade-in">
-            Copied!
-          </div>
-        )}
-
-        {/* Timestamp + delivery status */}
+        {/* Timestamp + delivery status + copy */}
         <div
           className={`flex items-center gap-1.5 mt-0.5 ${
             isUser ? "justify-end" : "justify-start"
@@ -181,6 +148,28 @@ export function MessageBubble({
               Tap to retry
             </button>
           )}
+
+          {/* Copy button - subtle icon */}
+          <button
+            type="button"
+            onClick={handleCopy}
+            className={`p-0.5 rounded transition-colors ${
+              copied
+                ? "text-emerald-400"
+                : "text-hub-text-muted/30 hover:text-hub-text-muted/60 active:text-hub-text-muted"
+            }`}
+            title={copied ? "Copied!" : "Copy"}
+          >
+            {copied ? (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            )}
+          </button>
         </div>
       </div>
     </div>

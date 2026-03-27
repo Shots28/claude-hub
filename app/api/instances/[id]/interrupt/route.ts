@@ -46,6 +46,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
       })
       .eq("id", id);
 
+    // Mark any streaming messages as done (stops the blinking cursor)
+    await (supabase.from("chat_messages") as any)
+      .update({ status: "done" })
+      .eq("instance_id", id)
+      .eq("status", "streaming");
+
     // Insert a system message noting the interruption (into chat_messages)
     await (supabase.from("chat_messages") as any).insert({
       instance_id: id,

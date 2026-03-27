@@ -89,13 +89,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
   try {
     const body = await req.json();
     // Accept both "text" and "content" field names
-    const content = (body.text || body.content || "").trim();
+    const textContent = (body.text || body.content || "").trim();
+    const attachments = body.attachments || [];
 
-    if (!content) {
+    if (!textContent && attachments.length === 0) {
       return NextResponse.json(
-        { error: "text or content is required" },
+        { error: "text/content or attachments required" },
         { status: 400 },
       );
+    }
+
+    // Build the content with embedded attachments for the bridge to parse
+    // Format: text content followed by a JSON block with attachments
+    let content = textContent;
+    if (attachments.length > 0) {
+      // Embed attachments as a special JSON block that the bridge will parse
+      const attachmentBlock = `\n\n<!-- ATTACHMENTS_JSON:${JSON.stringify(attachments)}:END_ATTACHMENTS -->`;
+      content = content + attachmentBlock;
     }
 
     // Insert into chat_messages (the realtime table)

@@ -9,7 +9,6 @@ import Link from "next/link";
 import { InstanceSidebar } from "@/components/hub/instance-sidebar";
 import { InstanceListMobile } from "@/components/hub/instance-list-mobile";
 import { CreateInstanceModal } from "@/components/hub/create-instance-modal";
-import { UnifiedInbox } from "@/components/hub/unified-inbox";
 import {
   HubRealtimeProvider,
   useHubRealtime,
@@ -21,7 +20,6 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const realtime = useHubRealtime();
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
-  const [inboxOpen, setInboxOpen] = useState(false);
 
   // Extract active instance ID from path
   const activeInstanceId = pathname.startsWith("/instances/")
@@ -60,39 +58,23 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      {/* Mobile bottom nav - Taller with centered plus */}
+      {/* Mobile bottom nav - Centered plus button */}
       <nav className="md:hidden flex-shrink-0 border-t border-hub-border bg-hub-bg safe-area-bottom">
         <div className="relative flex items-center justify-between h-16 max-w-md mx-auto px-6">
-          {/* Left side: Chats */}
+          {/* Left: Chats */}
           <button
             type="button"
             onClick={() => setMobileListOpen(true)}
-            className={`flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
               mobileListOpen
                 ? "bg-hub-accent/15 text-hub-accent"
                 : "text-hub-text-muted active:bg-hub-surface-2"
             }`}
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
             </svg>
             <span className="text-[10px] font-medium">Chats</span>
-          </button>
-
-          {/* Left-center: Inbox */}
-          <button
-            type="button"
-            onClick={() => setInboxOpen(true)}
-            className={`relative flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
-              inboxOpen
-                ? "bg-hub-accent/15 text-hub-accent"
-                : "text-hub-text-muted active:bg-hub-surface-2"
-            }`}
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z" />
-            </svg>
-            <span className="text-[10px] font-medium">Inbox</span>
             {totalAttention > 0 && (
               <span className="absolute top-1 right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1">
                 {totalAttention > 9 ? "9+" : totalAttention}
@@ -100,7 +82,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
             )}
           </button>
 
-          {/* Center: New Instance - absolutely centered */}
+          {/* Center: New Instance - floating blue button */}
           <button
             type="button"
             onClick={() => setMobileCreateOpen(true)}
@@ -111,10 +93,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
             </svg>
           </button>
 
-          {/* Right-center: placeholder for symmetry */}
-          <div className="w-14" />
-
-          {/* Right side: Settings */}
+          {/* Right: Settings */}
           <Link
             href="/settings"
             className={`flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
@@ -151,17 +130,6 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           window.location.href = `/instances/${instanceId}`;
         }}
         existingNames={realtime.instances.map((i) => i.name)}
-      />
-
-      {/* Unified inbox panel */}
-      <UnifiedInbox
-        instances={realtime.instances}
-        messages={realtime.messages}
-        pendingPermissions={realtime.pendingPermissions}
-        onApprove={realtime.approvePermission}
-        onDeny={realtime.denyPermission}
-        open={inboxOpen}
-        onClose={() => setInboxOpen(false)}
       />
     </div>
   );

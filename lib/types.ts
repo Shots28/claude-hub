@@ -32,6 +32,23 @@ export interface InstanceState {
 
 export type ToolInput = { [key: string]: unknown };
 
+// ---- Message Attachments ----
+
+export type ImageAttachment = {
+  type: "image";
+  media_type: string; // e.g., "image/png", "image/jpeg"
+  data: string; // base64-encoded image data
+  name: string;
+};
+
+export type FileAttachment = {
+  type: "file";
+  name: string;
+  content: string; // text content
+};
+
+export type MessageAttachment = ImageAttachment | FileAttachment;
+
 // ---- Client → Server messages ----
 
 export interface ClientSendMessage {

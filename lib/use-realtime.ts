@@ -14,6 +14,7 @@ import type {
   DbInstance,
   DbPendingPermission,
   InstanceStatus,
+  MessageAttachment,
   UiMessage,
 } from "@/lib/types";
 
@@ -26,7 +27,7 @@ export interface RealtimeState {
   connected: boolean;
   connectionError: string | null;
   clearError: () => void;
-  sendMessage: (instanceId: string, text: string) => Promise<void>;
+  sendMessage: (instanceId: string, text: string, attachments?: MessageAttachment[]) => Promise<void>;
   retryMessage: (optimisticId: string) => Promise<void>;
   interrupt: (instanceId: string) => Promise<void>;
   approvePermission: (permissionId: string) => Promise<void>;
@@ -346,14 +347,29 @@ export function useRealtime(): RealtimeState {
   // -- Actions --
 
   const sendMessage = useCallback(
-    async (instanceId: string, text: string) => {
+    async (instanceId: string, text: string, attachments?: MessageAttachment[]) => {
+      // Build display content - include image indicators for UI
+      let displayContent = text;
+      if (attachments && attachments.length > 0) {
+        const imageCount = attachments.filter(a => a.type === "image").length;
+        const fileCount = attachments.filter(a => a.type === "file").length;
+        const indicators: string[] = [];
+        if (imageCount > 0) indicators.push(`📷 ${imageCount} image${imageCount > 1 ? "s" : ""}`);
+        if (fileCount > 0) indicators.push(`📎 ${fileCount} file${fileCount > 1 ? "s" : ""}`);
+        if (indicators.length > 0 && text) {
+          displayContent = `${text}\n\n[${indicators.join(", ")}]`;
+        } else if (indicators.length > 0) {
+          displayContent = `[${indicators.join(", ")}]`;
+        }
+      }
+
       // Optimistic UI — show message immediately with "pending" delivery status
       const optimisticId = `optimistic-${Date.now()}`;
       const optimisticMsg: UiMessage = {
         id: optimisticId,
         instance_id: instanceId,
         role: "user",
-        content: text,
+        content: displayContent,
         tool_name: null,
         tool_id: null,
         is_error: false,
@@ -378,7 +394,7 @@ export function useRealtime(): RealtimeState {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: text }),
+            body: JSON.stringify({ content: text, attachments }),
             signal: controller.signal,
             keepalive: true,
           });

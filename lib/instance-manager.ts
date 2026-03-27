@@ -187,6 +187,26 @@ export class InstanceManager extends EventEmitter {
     this.emit("status_change", id, status, error);
   }
 
+  // Parse attachments from the message content
+  private parseAttachments(message: string): {
+    text: string;
+    attachments: Array<{ type: string; media_type?: string; data?: string; name: string; content?: string }>;
+  } {
+    const attachmentMatch = message.match(/<!-- ATTACHMENTS_JSON:(.+?):END_ATTACHMENTS -->/s);
+    if (!attachmentMatch) {
+      return { text: message, attachments: [] };
+    }
+
+    try {
+      const attachments = JSON.parse(attachmentMatch[1]);
+      const text = message.replace(/\n\n<!-- ATTACHMENTS_JSON:.+?:END_ATTACHMENTS -->/s, "").trim();
+      return { text, attachments };
+    } catch {
+      console.warn("[InstanceManager] Failed to parse attachments JSON");
+      return { text: message, attachments: [] };
+    }
+  }
+
   async sendMessage(instanceId: string, message: string): Promise<void> {
     // Check if instance already has active query
     if (this.activeQueries.has(instanceId)) {
@@ -203,6 +223,9 @@ export class InstanceManager extends EventEmitter {
       });
       return;
     }
+
+    // Parse any attachments from the message
+    const { text: textContent, attachments } = this.parseAttachments(message);
 
     // Check concurrency - queue if needed
     const queuePos = this.semaphore.queueLength;
@@ -324,12 +347,48 @@ export class InstanceManager extends EventEmitter {
         };
       }
 
+      // Build the prompt - can be a string or array of content blocks for multimodal
+      let prompt: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>;
+
+      if (attachments.length > 0) {
+        // Build multimodal prompt with images and text
+        const contentBlocks: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+
+        // Add images first
+        for (const att of attachments) {
+          if (att.type === "image" && att.media_type && att.data) {
+            contentBlocks.push({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: att.media_type,
+                data: att.data,
+              },
+            });
+          } else if (att.type === "file" && att.content) {
+            // Include file content as text
+            const fileText = `\n\n<file name="${att.name}">\n${att.content}\n</file>`;
+            contentBlocks.push({ type: "text", text: fileText });
+          }
+        }
+
+        // Add the user's text message
+        if (textContent) {
+          contentBlocks.push({ type: "text", text: textContent });
+        }
+
+        prompt = contentBlocks.length > 0 ? contentBlocks : textContent || "";
+        console.log(`[InstanceManager] Sending multimodal message with ${attachments.filter(a => a.type === "image").length} images`);
+      } else {
+        prompt = textContent;
+      }
+
       // Try to resume session; if it fails, retry without resume
       let queryIterable: AsyncIterable<any>;
       if (instance.current_session_id) {
         try {
           const resumeOpts = { ...queryOptions, resume: instance.current_session_id };
-          queryIterable = query({ prompt: message, options: resumeOpts });
+          queryIterable = query({ prompt, options: resumeOpts });
           // Test if the iterable works by getting the first event
           const iter = queryIterable[Symbol.asyncIterator]();
           const first = await iter.next();
@@ -349,10 +408,10 @@ export class InstanceManager extends EventEmitter {
             .from("instances")
             .update({ current_session_id: null })
             .eq("id", instanceId);
-          queryIterable = query({ prompt: message, options: queryOptions });
+          queryIterable = query({ prompt, options: queryOptions });
         }
       } else {
-        queryIterable = query({ prompt: message, options: queryOptions });
+        queryIterable = query({ prompt, options: queryOptions });
       }
 
       for await (const event of queryIterable) {
@@ -496,8 +555,17 @@ export class InstanceManager extends EventEmitter {
     message: string,
     assistantMsgId: string | undefined
   ): Promise<void> {
+    // Parse attachments for mock response
+    const { text, attachments } = this.parseAttachments(message);
+    const imageCount = attachments.filter(a => a.type === "image").length;
+    const fileCount = attachments.filter(a => a.type === "file").length;
+
     // Mock response for development when SDK is not available
-    const mockResponse = `I received your message: "${message}"\n\nThis is a mock response because the Claude Agent SDK is not installed in this environment. In production, this would be a real Claude Code response with tool calls, file edits, and more.\n\nThe instance is configured at: ${instanceId}`;
+    let attachmentInfo = "";
+    if (imageCount > 0 || fileCount > 0) {
+      attachmentInfo = `\n\nI also received ${imageCount} image(s) and ${fileCount} file(s).`;
+    }
+    const mockResponse = `I received your message: "${text}"${attachmentInfo}\n\nThis is a mock response because the Claude Agent SDK is not installed in this environment. In production, this would be a real Claude Code response with tool calls, file edits, and more.\n\nThe instance is configured at: ${instanceId}`;
 
     let sent = "";
     const words = mockResponse.split(" ");

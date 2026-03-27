@@ -18,6 +18,7 @@ import type {
   DbInstance,
   DbPendingPermission,
   InstanceStatus,
+  MessageAttachment,
   PermissionMode,
   UiMessage,
 } from "@/lib/types";
@@ -66,7 +67,7 @@ interface ChatViewProps {
   pendingPermissions: DbPendingPermission[];
   connectionError: string | null;
   onClearError: () => void;
-  onSendMessage: (instanceId: string, text: string) => Promise<void>;
+  onSendMessage: (instanceId: string, text: string, attachments?: MessageAttachment[]) => Promise<void>;
   onRetryMessage: (optimisticId: string) => Promise<void>;
   onInterrupt: (instanceId: string) => Promise<void>;
   onApprovePermission: (permissionId: string) => Promise<void>;
@@ -112,7 +113,6 @@ export function ChatView({
 }: ChatViewProps) {
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [clearingSession, setClearingSession] = useState(false);
   const [updatingMode, setUpdatingMode] = useState(false);
   const [updatingEffort, setUpdatingEffort] = useState(false);
   const [updatingModel, setUpdatingModel] = useState(false);
@@ -153,14 +153,39 @@ export function ChatView({
   }, [instanceMessages]);
 
   const handleSend = useCallback(async (text: string, attachments?: Attachment[]) => {
-    // TODO: Handle file attachments - for now just send the text
-    // When attachments are provided, they would need to be uploaded and their
-    // references included in the message
+    // Process attachments - convert images to base64 for Claude's vision API
     if (attachments && attachments.length > 0) {
-      console.log("[ChatView] Attachments received:", attachments.map(a => a.name));
-      // For now, include attachment names in the message
-      const attachmentInfo = attachments.map(a => `[Attached: ${a.name}]`).join(" ");
-      await onSendMessage(instance.id, `${text}\n\n${attachmentInfo}`);
+      const processedAttachments: MessageAttachment[] = [];
+
+      for (const attachment of attachments) {
+        if (attachment.type === "image" && attachment.preview) {
+          // Extract base64 data from data URL (format: data:image/png;base64,...)
+          const match = attachment.preview.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            processedAttachments.push({
+              type: "image",
+              media_type: match[1],
+              data: match[2],
+              name: attachment.name,
+            });
+          }
+        } else if (attachment.type === "file") {
+          // Read text file content
+          try {
+            const content = await attachment.file.text();
+            processedAttachments.push({
+              type: "file",
+              name: attachment.name,
+              content,
+            });
+          } catch {
+            console.warn(`[ChatView] Could not read file: ${attachment.name}`);
+          }
+        }
+      }
+
+      // Send with attachments
+      await onSendMessage(instance.id, text, processedAttachments.length > 0 ? processedAttachments : undefined);
     } else {
       await onSendMessage(instance.id, text);
     }
@@ -254,24 +279,6 @@ export function ChatView({
     }
   }, [instance.id, currentModel, updatingModel]);
 
-  // New Chat handler
-  const handleNewChat = useCallback(async () => {
-    if (clearingSession) return;
-    setClearingSession(true);
-    try {
-      await fetch(`/api/instances/${instance.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current_session_id: null }),
-      });
-      await onLoadMessages(instance.id);
-    } catch {
-      // silently fail
-    } finally {
-      setClearingSession(false);
-    }
-  }, [instance.id, onLoadMessages, clearingSession]);
-
   const modeConfig = getModeConfig(currentMode);
   const effortConfig = EFFORT_LEVELS.find(e => e.value === currentEffort) || EFFORT_LEVELS[1];
   const modelConfig = getModelConfig(currentModel);
@@ -284,45 +291,29 @@ export function ChatView({
       {/* Header - Clean and minimal */}
       <div className="flex-shrink-0 border-b border-hub-border bg-hub-bg/80 backdrop-blur-sm px-4 py-2.5">
         <div className="max-w-3xl mx-auto">
-          {/* Top row: Name + New Chat */}
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <h1 className="text-sm font-semibold truncate">{instance.name}</h1>
-              {/* Simple status indicator */}
-              {isBusy && (
-                <span className="flex items-center gap-1.5 text-xs text-blue-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                  {isQueued ? "Queued" : "Working"}
-                </span>
-              )}
-              {instancePermissions.length > 0 && (
-                <span className="flex items-center gap-1.5 text-xs text-orange-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
-                  Waiting
-                </span>
-              )}
-              {instance.status === "error" && (
-                <span className="text-xs text-red-400">Error</span>
-              )}
-              {/* Bridge indicator - very subtle */}
-              {bridgeStatus.health === "offline" && (
-                <span className="text-[10px] text-yellow-500">Offline</span>
-              )}
-            </div>
-
-            {/* New Chat button - clear and tappable */}
-            <button
-              type="button"
-              onClick={handleNewChat}
-              disabled={clearingSession}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-hub-surface-2 hover:bg-hub-border active:bg-hub-border text-hub-text-muted hover:text-hub-text disabled:opacity-50 transition-all text-xs font-medium"
-              aria-label="New chat"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              New
-            </button>
+          {/* Top row: Name + status indicators */}
+          <div className="flex items-center gap-2 min-w-0 mb-2">
+            <h1 className="text-sm font-semibold truncate">{instance.name}</h1>
+            {/* Simple status indicator */}
+            {isBusy && (
+              <span className="flex items-center gap-1.5 text-xs text-blue-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                {isQueued ? "Queued" : "Working"}
+              </span>
+            )}
+            {instancePermissions.length > 0 && (
+              <span className="flex items-center gap-1.5 text-xs text-orange-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                Waiting
+              </span>
+            )}
+            {instance.status === "error" && (
+              <span className="text-xs text-red-400">Error</span>
+            )}
+            {/* Bridge indicator - very subtle */}
+            {bridgeStatus.health === "offline" && (
+              <span className="text-[10px] text-yellow-500">Offline</span>
+            )}
           </div>
 
           {/* Bottom row: Tappable pills for Mode, Effort, Files */}

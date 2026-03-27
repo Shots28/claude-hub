@@ -416,6 +416,10 @@ async function initBridge(
   // No messages are lost or need a "superseded" status.
   const pollInterval = setInterval(async () => {
     try {
+      // Refresh instance cache on every poll to catch newly created instances
+      // (Realtime subscription for INSERT events is unreliable)
+      await refreshLocalInstanceCache();
+
       if (localInstanceIds.size === 0) return;
 
       const { data: queued } = await bridgeSupabase

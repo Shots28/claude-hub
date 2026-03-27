@@ -203,10 +203,23 @@ export function useRealtime(): RealtimeState {
         { event: "INSERT", schema: "public", table: "chat_messages" },
         (payload) => {
           console.log("[realtime] INSERT chat_message:", payload.new?.id);
-          const newMsg = payload.new as DbMessage;
+          const newMsg = payload.new as UiMessage;
           setMessages((prev) => {
-            // Deduplicate
+            // Deduplicate by real ID
             if (prev.some((m) => m.id === newMsg.id)) return prev;
+            // If this is a user message, check if there's an optimistic message
+            // with matching content that should be replaced (not duplicated)
+            if (newMsg.role === "user") {
+              const optimisticIdx = prev.findIndex(
+                (m) => m.id.startsWith("optimistic-") && m.content === newMsg.content,
+              );
+              if (optimisticIdx >= 0) {
+                // Replace the optimistic message with the real one
+                const updated = [...prev];
+                updated[optimisticIdx] = { ...newMsg, deliveryStatus: "delivered" as const };
+                return updated;
+              }
+            }
             return [...prev, newMsg];
           });
         },

@@ -79,7 +79,7 @@ export default function InstancePage({ params }: InstancePageProps) {
   }
 
   return (
-    <div className="relative flex-1 flex flex-col overflow-hidden">
+    <div className="relative flex-1 flex flex-col overflow-hidden" style={{ touchAction: "pan-y", overscrollBehaviorX: "none" }}>
       {/* Swipe indicator - left edge (swipe right to go to previous) */}
       {canSwipeRight && swipeState.swiping && swipeState.direction === "right" && (
         <div

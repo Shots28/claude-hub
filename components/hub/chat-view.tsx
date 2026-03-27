@@ -124,23 +124,18 @@ export function ChatView({
   const [showFileActivity, setShowFileActivity] = useState(false);
 
   // Load messages when instance changes OR component mounts
-  // Use a ref to track if we've loaded for this mount
-  const hasLoadedRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
 
   useEffect(() => {
-    // Always load on mount, regardless of instance.id being same
-    console.log("[ChatView] useEffect triggered for instance:", instance.id, "hasLoaded:", hasLoadedRef.current);
-    hasLoadedRef.current = true;
+    console.log("[ChatView] Loading messages for instance:", instance.id);
+    retryCountRef.current = 0;
     setLoading(true);
+
     onLoadMessages(instance.id).finally(() => {
-      console.log("[ChatView] loadMessages complete, setting loading=false");
+      console.log("[ChatView] loadMessages complete");
       setLoading(false);
     });
-
-    // Reset hasLoaded when instance changes
-    return () => {
-      hasLoadedRef.current = false;
-    };
   }, [instance.id, onLoadMessages]);
 
   // Filter messages for this instance
@@ -150,6 +145,18 @@ export function ChatView({
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
     [messages, instance.id]
   );
+
+  // Retry loading if we got 0 messages (possible race condition or API issue)
+  useEffect(() => {
+    if (!loading && instanceMessages.length === 0 && retryCountRef.current < maxRetries) {
+      retryCountRef.current++;
+      console.log(`[ChatView] No messages after load, retrying (${retryCountRef.current}/${maxRetries})...`);
+      const timer = setTimeout(() => {
+        onLoadMessages(instance.id);
+      }, 500 * retryCountRef.current); // Exponential backoff: 500ms, 1000ms, 1500ms
+      return () => clearTimeout(timer);
+    }
+  }, [loading, instanceMessages.length, instance.id, onLoadMessages]);
 
   // Extract file activity from messages
   const fileActivity = useFileActivity(instanceMessages);
@@ -301,7 +308,7 @@ export function ChatView({
   const isBusy = isRunning || isQueued;
 
   return (
-    <div className="flex flex-col h-full overflow-x-hidden">
+    <div className="flex flex-col h-full overflow-x-hidden" style={{ touchAction: "pan-y", overscrollBehaviorX: "none" }}>
       {/* Header - Clean and minimal */}
       <div className="flex-shrink-0 border-b border-hub-border bg-hub-bg/80 backdrop-blur-sm px-4 py-2.5">
         <div className="max-w-3xl mx-auto">

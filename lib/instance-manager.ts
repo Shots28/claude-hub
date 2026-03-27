@@ -299,6 +299,7 @@ export class InstanceManager extends EventEmitter {
           ? instance.permission_mode
           : instance.permission_mode === "auto" ? "bypassPermissions"
           : "default",
+        abortSignal: controller.signal,
         ...(mcpServers ? { mcpServers } : {}),
       };
 

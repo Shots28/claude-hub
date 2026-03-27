@@ -44,7 +44,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
   }, [realtime]);
 
   return (
-    <div className="h-dvh flex flex-col md:flex-row overflow-hidden bg-hub-bg">
+    <div className="h-dvh flex flex-col md:flex-row overflow-hidden bg-hub-bg pt-safe">
       {/* Desktop sidebar */}
       <InstanceSidebar
         instances={realtime.instances}

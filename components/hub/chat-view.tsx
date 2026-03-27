@@ -23,12 +23,27 @@ import type {
   UiMessage,
 } from "@/lib/types";
 
-const PERMISSION_MODES: { value: PermissionMode; label: string; short: string }[] = [
-  { value: "bypassPermissions", label: "Bypass all permissions", short: "Bypass" },
-  { value: "acceptEdits", label: "Auto-accept edits", short: "Auto-edit" },
-  { value: "plan", label: "Plan mode", short: "Plan" },
-  { value: "default", label: "Ask for approval", short: "Ask" },
+const PERMISSION_MODES: { value: PermissionMode; label: string; short: string; color: string }[] = [
+  { value: "bypassPermissions", label: "Bypass all permissions", short: "Bypass", color: "text-red-500" },
+  { value: "acceptEdits", label: "Auto-accept edits", short: "Auto-edit", color: "text-orange-500" },
+  { value: "plan", label: "Plan mode", short: "Plan", color: "text-blue-500" },
+  { value: "default", label: "Ask for approval", short: "Ask", color: "text-hub-text-muted" },
 ];
+
+// Get mode color class
+function getModeColor(mode: PermissionMode): string {
+  return PERMISSION_MODES.find(m => m.value === mode)?.color || "text-hub-text-muted";
+}
+
+// Get mode border color for input
+function getModeBorderColor(mode: PermissionMode): string {
+  switch (mode) {
+    case "bypassPermissions": return "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50";
+    case "acceptEdits": return "border-orange-500/50 focus:ring-orange-500/50 focus:border-orange-500/50";
+    case "plan": return "border-blue-500/50 focus:ring-blue-500/50 focus:border-blue-500/50";
+    default: return "border-hub-border focus:ring-hub-accent/50 focus:border-hub-accent/50";
+  }
+}
 
 interface ChatViewProps {
   instance: DbInstance;
@@ -155,14 +170,25 @@ export function ChatView({
     onInterrupt(instance.id);
   }, [instance.id, onInterrupt]);
 
+  // Local optimistic mode state for immediate UI feedback
+  const [optimisticMode, setOptimisticMode] = useState<PermissionMode | null>(null);
+  const currentMode: PermissionMode = optimisticMode ?? (instance.permission_mode as PermissionMode);
+
+  // Sync optimistic state when real instance updates
+  useEffect(() => {
+    setOptimisticMode(null);
+  }, [instance.permission_mode]);
+
   // Cycle to next permission mode on tap
   const handleModeCycle = useCallback(async () => {
     if (updatingMode) return;
 
-    const currentIndex = PERMISSION_MODES.findIndex(m => m.value === instance.permission_mode);
+    const currentIndex = PERMISSION_MODES.findIndex(m => m.value === currentMode);
     const nextIndex = (currentIndex + 1) % PERMISSION_MODES.length;
     const nextMode = PERMISSION_MODES[nextIndex].value;
 
+    // Optimistic update - show immediately
+    setOptimisticMode(nextMode);
     setUpdatingMode(true);
     try {
       await fetch(`/api/instances/${instance.id}`, {
@@ -171,11 +197,12 @@ export function ChatView({
         body: JSON.stringify({ permissionMode: nextMode }),
       });
     } catch {
-      // silently fail
+      // Revert on failure
+      setOptimisticMode(null);
     } finally {
       setUpdatingMode(false);
     }
-  }, [instance.id, instance.permission_mode, updatingMode]);
+  }, [instance.id, currentMode, updatingMode]);
 
   // New Chat: clears the session_id so the next message starts a fresh Claude
   // conversation. Previous messages remain visible (no visual separator needed —
@@ -245,10 +272,10 @@ export function ChatView({
                 type="button"
                 onClick={handleModeCycle}
                 disabled={updatingMode}
-                className="text-xs text-hub-accent hover:text-hub-accent-hover disabled:opacity-50 transition-colors"
+                className={`text-xs font-medium disabled:opacity-50 transition-colors ${getModeColor(currentMode)}`}
                 title="Tap to cycle mode"
               >
-                {updatingMode ? "..." : PERMISSION_MODES.find(m => m.value === instance.permission_mode)?.short || "Mode"}
+                {updatingMode ? "..." : PERMISSION_MODES.find(m => m.value === currentMode)?.short || "Mode"}
               </button>
             </div>
           </div>
@@ -356,6 +383,7 @@ export function ChatView({
         onSend={handleSend}
         onInterrupt={handleInterrupt}
         instanceStatus={instance.status as InstanceStatus}
+        modeBorderClass={getModeBorderColor(currentMode)}
       />
 
       {/* File viewer modal */}

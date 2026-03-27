@@ -11,6 +11,7 @@ interface ChatInputProps {
   onInterrupt: () => void;
   instanceStatus: InstanceStatus;
   disabled?: boolean;
+  modeBorderClass?: string;
 }
 
 export function ChatInput({
@@ -18,6 +19,7 @@ export function ChatInput({
   onInterrupt,
   instanceStatus,
   disabled = false,
+  modeBorderClass = "border-hub-border focus:ring-hub-accent/50 focus:border-hub-accent/50",
 }: ChatInputProps) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
@@ -205,7 +207,7 @@ export function ChatInput({
             }
             disabled={disabled}
             rows={1}
-            className="w-full bg-hub-surface-2 border border-hub-border rounded-xl px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none focus:ring-2 focus:ring-hub-accent/50 focus:border-hub-accent/50 disabled:opacity-50 transition-colors"
+            className={`w-full bg-hub-surface-2 border rounded-xl px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none focus:ring-2 disabled:opacity-50 transition-colors ${modeBorderClass}`}
           />
         </div>
 

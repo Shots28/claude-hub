@@ -61,6 +61,8 @@ interface PendingPermission {
 export class InstanceManager extends EventEmitter {
   private supabase = createClient(supabaseUrl, supabaseServiceKey);
   private activeQueries = new Map<string, AbortController>();
+  private queuedInstances = new Set<string>(); // Track instances waiting for semaphore
+  private interruptedInstances = new Set<string>(); // Track interrupted instances
   private semaphore: Semaphore;
   private pendingPermissions = new Map<string, PendingPermission>();
   private idleTimers = new Map<string, NodeJS.Timeout>();
@@ -205,11 +207,22 @@ export class InstanceManager extends EventEmitter {
     // Check concurrency - queue if needed
     const queuePos = this.semaphore.queueLength;
     if (queuePos > 0) {
+      this.queuedInstances.add(instanceId);
       await this.updateStatus(instanceId, "queued");
       this.emit("queue_position", instanceId, queuePos);
     }
 
     await this.semaphore.acquire();
+
+    // Check if interrupted while waiting in queue
+    this.queuedInstances.delete(instanceId);
+    if (this.interruptedInstances.has(instanceId)) {
+      this.interruptedInstances.delete(instanceId);
+      this.semaphore.release();
+      console.log(`[InstanceManager] Instance ${instanceId} was interrupted while queued, aborting`);
+      await this.updateStatus(instanceId, "idle");
+      return;
+    }
 
     // Clear any idle timer
     const idleTimer = this.idleTimers.get(instanceId);
@@ -579,13 +592,28 @@ export class InstanceManager extends EventEmitter {
   }
 
   async interrupt(instanceId: string): Promise<boolean> {
+    // Handle queued instances (waiting for semaphore)
+    if (this.queuedInstances.has(instanceId)) {
+      console.log(`[InstanceManager] Marking queued instance ${instanceId} for interrupt`);
+      this.interruptedInstances.add(instanceId);
+      // Status will be set to idle when the query checks after acquiring semaphore
+      return true;
+    }
+
+    // Handle running instances (have an AbortController)
     const controller = this.activeQueries.get(instanceId);
     if (!controller) return false;
 
+    console.log(`[InstanceManager] Aborting running instance ${instanceId}`);
     controller.abort();
     this.activeQueries.delete(instanceId);
     await this.updateStatus(instanceId, "idle");
     return true;
+  }
+
+  // Check if instance is running or queued
+  isRunningOrQueued(instanceId: string): boolean {
+    return this.activeQueries.has(instanceId) || this.queuedInstances.has(instanceId);
   }
 
   private startIdleTimer(instanceId: string) {

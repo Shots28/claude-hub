@@ -99,6 +99,29 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Safe area padding for iOS status bar */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Mode colors */
+.mode-bypass {
+  --mode-color: #ef4444;
+}
+.mode-auto-edit {
+  --mode-color: #f97316;
+}
+.mode-plan {
+  --mode-color: #3b82f6;
+}
+.mode-ask {
+  --mode-color: #a3a3a3;
+}
+
 /* Hide scrollbar but allow scrolling */
 .scrollbar-hide {
   -ms-overflow-style: none;

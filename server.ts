@@ -296,7 +296,7 @@ async function initBridge(
     }, async (payload: any) => {
       const { id, status } = payload.new;
       // If user set status to "idle" via the interrupt API, abort the running query
-      if (status === "idle" && localInstanceIds.has(id) && manager.isRunning(id)) {
+      if (status === "idle" && localInstanceIds.has(id) && manager.isRunningOrQueued(id)) {
         console.log(`[bridge] User interrupted instance ${id}, aborting...`);
         await manager.interrupt(id);
       }

@@ -3,6 +3,9 @@
 // Hub Layout — Sidebar (desktop) + Bottom Nav (mobile) + Realtime Provider
 // ---------------------------------------------------------------------------
 
+// Force dynamic rendering to avoid SSR context issues
+export const dynamic = "force-dynamic";
+
 import { useCallback, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -22,7 +25,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
 
   // Extract active instance ID from path
-  const activeInstanceId = pathname.startsWith("/instances/")
+  const activeInstanceId = pathname?.startsWith("/instances/")
     ? pathname.split("/")[2]
     : undefined;
 
@@ -34,9 +37,9 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
   );
 
   // Determine active bottom nav tab
-  const activeTab = pathname.startsWith("/settings")
+  const activeTab = pathname?.startsWith("/settings")
     ? "settings"
-    : pathname.startsWith("/instances")
+    : pathname?.startsWith("/instances")
       ? "active"
       : "instances";
 

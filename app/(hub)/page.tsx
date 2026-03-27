@@ -3,6 +3,9 @@
 // Hub Home — Redirect to first instance or show empty state
 // ---------------------------------------------------------------------------
 
+// Force dynamic rendering to avoid SSR context issues
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreateInstanceModal } from "@/components/hub/create-instance-modal";

@@ -1,4 +1,6 @@
 "use client";
+
+export const dynamic = "force-dynamic";
 // ---------------------------------------------------------------------------
 // Chats Page — Full-page Slack-like chat navigation
 // ---------------------------------------------------------------------------
@@ -22,7 +24,7 @@ function ChatsPageContent() {
 
   // Get instance ID from URL or select first instance
   useEffect(() => {
-    const idFromUrl = searchParams.get("id");
+    const idFromUrl = searchParams?.get("id");
     if (idFromUrl) {
       setSelectedId(idFromUrl);
     } else if (realtime.instances.length > 0 && !selectedId) {

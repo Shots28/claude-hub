@@ -1,4 +1,6 @@
 "use client";
+
+export const dynamic = "force-dynamic";
 // ---------------------------------------------------------------------------
 // Settings Page — Bridge status, session, about info
 // ---------------------------------------------------------------------------

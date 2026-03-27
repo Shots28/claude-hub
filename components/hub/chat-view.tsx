@@ -3,7 +3,7 @@
 // ChatView — Container for the chat experience for a single instance
 // ---------------------------------------------------------------------------
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageList } from "./message-list";
 import { ChatInput, type Attachment } from "./chat-input";
 import { PermissionBanner } from "./permission-banner";
@@ -123,14 +123,24 @@ export function ChatView({
   const [viewingPlan, setViewingPlan] = useState<string | null>(null);
   const [showFileActivity, setShowFileActivity] = useState(false);
 
-  // Load messages when instance changes
+  // Load messages when instance changes OR component mounts
+  // Use a ref to track if we've loaded for this mount
+  const hasLoadedRef = useRef(false);
+
   useEffect(() => {
-    console.log("[ChatView] useEffect triggered for instance:", instance.id);
+    // Always load on mount, regardless of instance.id being same
+    console.log("[ChatView] useEffect triggered for instance:", instance.id, "hasLoaded:", hasLoadedRef.current);
+    hasLoadedRef.current = true;
     setLoading(true);
     onLoadMessages(instance.id).finally(() => {
       console.log("[ChatView] loadMessages complete, setting loading=false");
       setLoading(false);
     });
+
+    // Reset hasLoaded when instance changes
+    return () => {
+      hasLoadedRef.current = false;
+    };
   }, [instance.id, onLoadMessages]);
 
   // Filter messages for this instance

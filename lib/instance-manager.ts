@@ -258,23 +258,12 @@ export class InstanceManager extends EventEmitter {
     this.activeQueries.set(instanceId, controller);
     await this.updateStatus(instanceId, "running");
 
-    // User message already inserted by the API route — just create assistant placeholder
-    // Create assistant message placeholder
-    const { data: assistantMsg } = await this.supabase
-      .from("chat_messages")
-      .insert({
-        instance_id: instanceId,
-        role: "assistant",
-        content: "",
-        status: "streaming",
-      })
-      .select()
-      .single();
-
-    const assistantMsgId = assistantMsg?.id;
+    // User message already inserted by the API route
+    // We'll create assistant messages lazily when we actually receive content
     let fullText = "";
-    let currentMsgId = assistantMsgId;
+    let currentMsgId: string | null = null;
     let turnText = "";
+    let currentTextBlockStarted = false;
 
     // Track current tool being built (input comes via deltas)
     let currentTool: { id: string; name: string; inputJson: string } | null = null;
@@ -291,7 +280,7 @@ export class InstanceManager extends EventEmitter {
         console.warn(
           "[InstanceManager] Claude Agent SDK not available, using mock mode"
         );
-        await this.mockQuery(instanceId, message, assistantMsgId);
+        await this.mockQuery(instanceId, message);
         return;
       }
 
@@ -425,57 +414,30 @@ export class InstanceManager extends EventEmitter {
           const streamEvent = event.event;
 
           if (streamEvent?.type === "message_start") {
-            // New assistant turn — if we already have text, finalize previous message
-            // and create a new one for this turn
+            // New assistant turn — finalize any existing message
             if (turnText && currentMsgId) {
               await this.supabase
                 .from("chat_messages")
                 .update({ content: turnText, status: "done" })
                 .eq("id", currentMsgId);
-
-              // Create new message for subsequent turns
-              const { data: newMsg } = await this.supabase
-                .from("chat_messages")
-                .insert({
-                  instance_id: instanceId,
-                  role: "assistant",
-                  content: "",
-                  status: "streaming",
-                })
-                .select()
-                .single();
-
-              if (newMsg) {
-                currentMsgId = newMsg.id;
-                turnText = "";
-              }
-            } else {
-              // First message_start — reuse the initial placeholder
-              // (currentMsgId is already assistantMsgId, turnText is empty)
-              turnText = "";
             }
-          } else if (streamEvent?.type === "content_block_delta") {
-            const delta = streamEvent.delta;
-            if (delta?.type === "text_delta" && delta.text) {
-              fullText += delta.text;
-              turnText += delta.text;
-              this.emit("text_delta", instanceId, delta.text);
-
-              // Update assistant message periodically
-              const debounceChars = parseInt(process.env.STREAMING_DEBOUNCE_CHARS || "50", 10);
-              const isFirstUpdate = turnText.length === delta.text.length;
-              if (isFirstUpdate || turnText.length % debounceChars < delta.text.length) {
-                await this.supabase
-                  .from("chat_messages")
-                  .update({ content: turnText, status: "streaming" })
-                  .eq("id", currentMsgId);
-              }
-            } else if (delta?.type === "input_json_delta" && delta.partial_json && currentTool) {
-              // Accumulate tool input JSON
-              currentTool.inputJson += delta.partial_json;
-            }
+            // Reset for new turn - messages will be created lazily per content block
+            currentMsgId = null;
+            turnText = "";
+            currentTextBlockStarted = false;
           } else if (streamEvent?.type === "content_block_start") {
             if (streamEvent.content_block?.type === "tool_use") {
+              // Finalize any in-progress text block before starting tool
+              if (currentTextBlockStarted && currentMsgId && turnText) {
+                await this.supabase
+                  .from("chat_messages")
+                  .update({ content: turnText, status: "done" })
+                  .eq("id", currentMsgId);
+                currentMsgId = null;
+                turnText = "";
+                currentTextBlockStarted = false;
+              }
+
               const toolName = streamEvent.content_block.name;
               const toolId = streamEvent.content_block.id;
 
@@ -487,9 +449,48 @@ export class InstanceManager extends EventEmitter {
                 toolName,
                 toolInput: {},
               });
+            } else if (streamEvent.content_block?.type === "text") {
+              // Starting a new text block - create message NOW so it has correct timestamp
+              currentTextBlockStarted = true;
+              const { data: newMsg } = await this.supabase
+                .from("chat_messages")
+                .insert({
+                  instance_id: instanceId,
+                  role: "assistant",
+                  content: "",
+                  status: "streaming",
+                })
+                .select()
+                .single();
+              if (newMsg) {
+                currentMsgId = newMsg.id;
+                turnText = "";
+              }
+            }
+          } else if (streamEvent?.type === "content_block_delta") {
+            const delta = streamEvent.delta;
+            if (delta?.type === "text_delta" && delta.text) {
+              fullText += delta.text;
+              turnText += delta.text;
+              this.emit("text_delta", instanceId, delta.text);
+
+              // Update assistant message periodically
+              if (currentMsgId) {
+                const debounceChars = parseInt(process.env.STREAMING_DEBOUNCE_CHARS || "50", 10);
+                const isFirstUpdate = turnText.length === delta.text.length;
+                if (isFirstUpdate || turnText.length % debounceChars < delta.text.length) {
+                  await this.supabase
+                    .from("chat_messages")
+                    .update({ content: turnText, status: "streaming" })
+                    .eq("id", currentMsgId);
+                }
+              }
+            } else if (delta?.type === "input_json_delta" && delta.partial_json && currentTool) {
+              // Accumulate tool input JSON
+              currentTool.inputJson += delta.partial_json;
             }
           } else if (streamEvent?.type === "content_block_stop") {
-            // Tool input is complete - store the tool message
+            // Handle tool completion
             if (currentTool) {
               let toolInput = {};
               try {
@@ -514,6 +515,17 @@ export class InstanceManager extends EventEmitter {
                 });
 
               currentTool = null;
+            }
+
+            // Handle text block completion
+            if (currentTextBlockStarted && currentMsgId && turnText) {
+              await this.supabase
+                .from("chat_messages")
+                .update({ content: turnText, status: "done" })
+                .eq("id", currentMsgId);
+              currentMsgId = null;
+              turnText = "";
+              currentTextBlockStarted = false;
             }
           }
         } else if (event.type === "result") {
@@ -591,8 +603,7 @@ export class InstanceManager extends EventEmitter {
 
   private async mockQuery(
     instanceId: string,
-    message: string,
-    assistantMsgId: string | undefined
+    message: string
   ): Promise<void> {
     // Parse attachments for mock response
     const { text, attachments } = this.parseAttachments(message);
@@ -606,6 +617,18 @@ export class InstanceManager extends EventEmitter {
     }
     const mockResponse = `I received your message: "${text}"${attachmentInfo}\n\nThis is a mock response because the Claude Agent SDK is not installed in this environment. In production, this would be a real Claude Code response with tool calls, file edits, and more.\n\nThe instance is configured at: ${instanceId}`;
 
+    // Create the assistant message
+    const { data: assistantMsg } = await this.supabase
+      .from("chat_messages")
+      .insert({
+        instance_id: instanceId,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      })
+      .select()
+      .single();
+
     let sent = "";
     const words = mockResponse.split(" ");
     for (const word of words) {
@@ -614,11 +637,11 @@ export class InstanceManager extends EventEmitter {
       await new Promise((r) => setTimeout(r, 50));
     }
 
-    if (assistantMsgId) {
+    if (assistantMsg?.id) {
       await this.supabase
         .from("chat_messages")
         .update({ content: mockResponse, status: "done" })
-        .eq("id", assistantMsgId);
+        .eq("id", assistantMsg.id);
     }
 
     this.emit("message_done", instanceId, {

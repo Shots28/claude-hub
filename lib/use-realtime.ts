@@ -347,11 +347,14 @@ export function useRealtime(): RealtimeState {
     // -- Visibility change: refresh data when app comes to foreground --
     const handleVisibilityChange = () => {
       if (document.hidden) return;
-      console.log("[realtime] App foregrounded — refreshing data");
+      console.log("[realtime] App foregrounded — refreshing data, activeInstance:", activeInstanceRef.current);
       refreshInstances();
       refreshPermissions();
       if (activeInstanceRef.current) {
+        console.log("[realtime] Reloading messages for:", activeInstanceRef.current);
         loadMessages(activeInstanceRef.current);
+      } else {
+        console.log("[realtime] No active instance to reload messages for");
       }
       // Clean stale optimistic messages on foreground
       cleanStaleOptimistic();

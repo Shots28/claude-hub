@@ -426,6 +426,7 @@ export function ChatView({
           streamingMessageId={streamingId}
           onRetryMessage={onRetryMessage}
           onViewPlan={(planPath) => setViewingPlan(planPath)}
+          onSendResponse={(response) => handleSend(response)}
         />
       )}
 

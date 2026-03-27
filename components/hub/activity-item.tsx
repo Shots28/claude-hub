@@ -10,6 +10,7 @@ import type { UiMessage } from "@/lib/types";
 interface ActivityItemProps {
   message: UiMessage;
   onViewPlan?: (planPath: string) => void;
+  onSendResponse?: (response: string) => void;
 }
 
 type ActivityType =
@@ -303,8 +304,11 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
   };
 }
 
-export function ActivityItem({ message, onViewPlan }: ActivityItemProps) {
+export function ActivityItem({ message, onViewPlan, onSendResponse }: ActivityItemProps) {
   const [expanded, setExpanded] = useState(false);
+  const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
+  const [customInput, setCustomInput] = useState("");
+  const [responded, setResponded] = useState(false);
 
   const activity = useMemo(() => parseActivity(message), [message]);
 
@@ -383,6 +387,152 @@ export function ActivityItem({ message, onViewPlan }: ActivityItemProps) {
           <pre className="text-[11px] text-hub-text-muted overflow-x-auto whitespace-pre-wrap">
             {JSON.stringify(activity.details, null, 2)}
           </pre>
+        </div>
+      )}
+
+      {/* Interactive UI for ExitPlanMode */}
+      {message.tool_name === "ExitPlanMode" && !responded && onSendResponse && (
+        <div className="mt-2 ml-9 mr-2 flex flex-col gap-2">
+          <p className="text-xs text-hub-text-muted mb-1">
+            Claude has prepared a plan. What would you like to do?
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                setResponded(true);
+                onSendResponse("Approved. Please proceed with the implementation.");
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 active:scale-95 transition-all"
+            >
+              Approve Plan
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(true);
+                setResponded(true);
+                const feedback = prompt("What changes would you like?");
+                if (feedback) {
+                  onSendResponse(`Please revise the plan: ${feedback}`);
+                } else {
+                  setResponded(false);
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 active:scale-95 transition-all"
+            >
+              Request Changes
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive UI for AskUserQuestion */}
+      {message.tool_name === "AskUserQuestion" && !responded && onSendResponse && (() => {
+        let input: Record<string, unknown> = {};
+        try {
+          input = JSON.parse(message.content) || {};
+        } catch {
+          // ignore parse errors
+        }
+        const questions = input.questions as Array<{
+          question?: string;
+          header?: string;
+          options?: Array<{ label?: string; description?: string }>;
+          multiSelect?: boolean;
+        }> | undefined;
+
+        if (!questions || questions.length === 0) return null;
+
+        return (
+          <div className="mt-2 ml-9 mr-2 flex flex-col gap-3">
+            {questions.map((q, qIdx) => (
+              <div key={qIdx} className="flex flex-col gap-2">
+                <p className="text-xs text-hub-text font-medium">
+                  {q.question || q.header || "Choose an option:"}
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  {q.options?.map((opt, optIdx) => {
+                    const optKey = `${qIdx}-${optIdx}`;
+                    const isSelected = selectedOptions.has(optKey);
+                    return (
+                      <button
+                        key={optIdx}
+                        type="button"
+                        onClick={() => {
+                          if (q.multiSelect) {
+                            const newSelected = new Set(selectedOptions);
+                            if (isSelected) {
+                              newSelected.delete(optKey);
+                            } else {
+                              newSelected.add(optKey);
+                            }
+                            setSelectedOptions(newSelected);
+                          } else {
+                            // Single select - respond immediately
+                            setResponded(true);
+                            onSendResponse(opt.label || `Option ${optIdx + 1}`);
+                          }
+                        }}
+                        title={opt.description}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
+                          isSelected
+                            ? "bg-hub-accent text-white border border-hub-accent"
+                            : "bg-hub-surface-2 text-hub-text border border-hub-border hover:bg-hub-border"
+                        }`}
+                      >
+                        {opt.label || `Option ${optIdx + 1}`}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const customResponse = prompt("Enter your response:");
+                      if (customResponse) {
+                        setResponded(true);
+                        onSendResponse(customResponse);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-hub-surface-2 text-hub-text-muted border border-hub-border hover:bg-hub-border transition-all active:scale-95"
+                  >
+                    Other...
+                  </button>
+                </div>
+                {/* Multi-select submit button */}
+                {q.multiSelect && selectedOptions.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectedLabels = Array.from(selectedOptions)
+                        .filter(key => key.startsWith(`${qIdx}-`))
+                        .map(key => {
+                          const optIdx = parseInt(key.split("-")[1]);
+                          return q.options?.[optIdx]?.label || `Option ${optIdx + 1}`;
+                        });
+                      setResponded(true);
+                      onSendResponse(selectedLabels.join(", "));
+                    }}
+                    className="self-start px-3 py-1.5 rounded-lg text-xs font-medium bg-hub-accent text-white hover:bg-hub-accent-hover active:scale-95 transition-all"
+                  >
+                    Submit Selection
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* Show responded state */}
+      {responded && (message.tool_name === "ExitPlanMode" || message.tool_name === "AskUserQuestion") && (
+        <div className="mt-2 ml-9 mr-2">
+          <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            Response sent
+          </span>
         </div>
       )}
     </div>

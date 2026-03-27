@@ -15,6 +15,7 @@ interface MessageBubbleProps {
   isFirstInTurn?: boolean;
   onRetry?: (optimisticId: string) => void;
   onViewPlan?: (planPath: string) => void;
+  onSendResponse?: (response: string) => void;
 }
 
 export function MessageBubble({
@@ -23,6 +24,7 @@ export function MessageBubble({
   isFirstInTurn = false,
   onRetry,
   onViewPlan,
+  onSendResponse,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
 
@@ -43,7 +45,7 @@ export function MessageBubble({
 
   // Tool call blocks are rendered as activity items for a richer feed
   if (isTool) {
-    return <ActivityItem message={message} onViewPlan={onViewPlan} />;
+    return <ActivityItem message={message} onViewPlan={onViewPlan} onSendResponse={onSendResponse} />;
   }
 
   // System messages

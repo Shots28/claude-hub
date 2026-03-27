@@ -12,6 +12,7 @@ interface MessageListProps {
   streamingMessageId?: string | null;
   onRetryMessage?: (optimisticId: string) => void;
   onViewPlan?: (planPath: string) => void;
+  onSendResponse?: (response: string) => void;
 }
 
 function formatDateSeparator(dateStr: string): string {
@@ -53,6 +54,7 @@ export function MessageList({
   streamingMessageId,
   onRetryMessage,
   onViewPlan,
+  onSendResponse,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -150,6 +152,7 @@ export function MessageList({
         isFirstInTurn={!prevMessage || prevMessage.role !== msg.role || !!prevMessage.tool_name !== !!msg.tool_name}
         onRetry={onRetryMessage}
         onViewPlan={onViewPlan}
+        onSendResponse={onSendResponse}
       />
     );
 

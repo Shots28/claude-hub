@@ -29,7 +29,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/sounds/") ||
     pathname === "/sw.js" ||
     pathname === "/manifest.json" ||
-    pathname === "/favicon.ico"
+    pathname === "/favicon.ico" ||
+    pathname === "/apple-touch-icon.png"
   ) {
     return NextResponse.next();
   }

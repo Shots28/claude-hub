@@ -10,7 +10,6 @@ import { useCallback, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { InstanceSidebar } from "@/components/hub/instance-sidebar";
-import { InstanceListMobile } from "@/components/hub/instance-list-mobile";
 import { CreateInstanceModal } from "@/components/hub/create-instance-modal";
 import {
   HubRealtimeProvider,
@@ -21,7 +20,6 @@ import { useNeedsAttention } from "@/lib/use-needs-attention";
 function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const realtime = useHubRealtime();
-  const [mobileListOpen, setMobileListOpen] = useState(false);
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
 
   // Extract active instance ID from path
@@ -30,7 +28,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
     : undefined;
 
   // Track instances needing attention (completed or permission pending)
-  const { needsAttention, totalAttention } = useNeedsAttention(
+  const { totalAttention } = useNeedsAttention(
     realtime.instances,
     realtime.pendingPermissions,
     activeInstanceId
@@ -65,11 +63,10 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
       <nav className="md:hidden flex-shrink-0 border-t border-hub-border bg-hub-bg pb-safe">
         <div className="flex items-center justify-center gap-2 h-10 px-4">
           {/* Chats */}
-          <button
-            type="button"
-            onClick={() => setMobileListOpen(true)}
+          <Link
+            href="/chats"
             className={`relative flex items-center gap-1.5 h-9 px-3 rounded-full transition-all active:scale-95 ${
-              mobileListOpen
+              pathname?.startsWith("/chats")
                 ? "bg-hub-accent text-white"
                 : "bg-hub-surface-2 text-hub-text-muted active:bg-hub-border"
             }`}
@@ -83,7 +80,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
                 {totalAttention > 9 ? "9+" : totalAttention}
               </span>
             )}
-          </button>
+          </Link>
 
           {/* New Instance - blue pill button */}
           <button
@@ -113,16 +110,6 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
       </nav>
-
-      {/* Mobile instance list panel */}
-      <InstanceListMobile
-        instances={realtime.instances}
-        activeId={activeInstanceId}
-        open={mobileListOpen}
-        onClose={() => setMobileListOpen(false)}
-        onRefresh={handleRefresh}
-        needsAttention={needsAttention}
-      />
 
       {/* Mobile create instance modal */}
       <CreateInstanceModal

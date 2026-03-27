@@ -125,8 +125,12 @@ export function ChatView({
 
   // Load messages when instance changes
   useEffect(() => {
+    console.log("[ChatView] useEffect triggered for instance:", instance.id);
     setLoading(true);
-    onLoadMessages(instance.id).finally(() => setLoading(false));
+    onLoadMessages(instance.id).finally(() => {
+      console.log("[ChatView] loadMessages complete, setting loading=false");
+      setLoading(false);
+    });
   }, [instance.id, onLoadMessages]);
 
   // Filter messages for this instance

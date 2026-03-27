@@ -71,23 +71,29 @@ export function useRealtime(): RealtimeState {
   // -- Load messages for a specific instance --
   const loadMessages = useCallback(async (instanceId: string) => {
     activeInstanceRef.current = instanceId; // Track for polling fallback
+    console.log("[realtime] loadMessages called for instance:", instanceId);
     try {
       const res = await fetch(`/api/instances/${instanceId}/messages`, {
         credentials: "include",
       });
+      console.log("[realtime] loadMessages response status:", res.status);
       if (res.ok) {
         const data = await res.json();
         const newMsgs: UiMessage[] = data.messages ?? [];
+        console.log("[realtime] loadMessages received:", newMsgs.length, "messages");
         // Merge with existing messages instead of replacing
         // This preserves messages from other instances when switching
         setMessages((prev) => {
           // Remove old messages for this instance, keep others
           const otherInstanceMsgs = prev.filter(m => m.instance_id !== instanceId);
+          console.log("[realtime] setMessages: keeping", otherInstanceMsgs.length, "other msgs, adding", newMsgs.length);
           return [...otherInstanceMsgs, ...newMsgs];
         });
+      } else {
+        console.error("[realtime] loadMessages failed:", res.status, await res.text());
       }
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error("[realtime] loadMessages error:", err);
     }
   }, []);
 

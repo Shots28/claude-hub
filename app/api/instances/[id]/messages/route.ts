@@ -58,6 +58,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
       );
     }
 
+    console.log(`[messages/GET] Returning ${data?.length ?? 0} messages for instance ${id}`);
     return NextResponse.json({ messages: data ?? [] }, { status: 200 });
   } catch (err) {
     console.error("[messages/GET] Unexpected error:", err);

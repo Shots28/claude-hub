@@ -68,10 +68,14 @@ export function ChatInput({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Shift+Enter or Cmd/Ctrl+Enter to send, plain Enter for new line
-    if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      handleSend();
+    if (e.key === "Enter") {
+      // Only send on Cmd/Ctrl+Enter (mobile-friendly: just use send button)
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        handleSend();
+      }
+      // Plain Enter and Shift+Enter both add new lines (default behavior)
+      // No preventDefault needed - textarea handles it naturally
     } else if (e.key === "Escape" && isRunning) {
       // Escape to interrupt when running
       onInterrupt();

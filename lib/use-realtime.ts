@@ -68,6 +68,19 @@ export function useRealtime(): RealtimeState {
     }
   }, []);
 
+  // -- Fetch pending permissions on mount --
+  const refreshPermissions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/permissions", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingPermissions(data.permissions ?? []);
+      }
+    } catch {
+      // silently fail — will retry on reconnect
+    }
+  }, []);
+
   // -- Load messages for a specific instance --
   const loadMessages = useCallback(async (instanceId: string) => {
     activeInstanceRef.current = instanceId; // Track for polling fallback

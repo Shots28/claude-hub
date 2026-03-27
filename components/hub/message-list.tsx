@@ -162,6 +162,7 @@ export function MessageList({
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth-chat scrollbar-hide py-4 space-y-1"
+        style={{ touchAction: "pan-y" }}
       >
         {elements}
         <div ref={bottomRef} />

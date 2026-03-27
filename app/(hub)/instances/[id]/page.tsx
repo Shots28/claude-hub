@@ -1,11 +1,13 @@
 "use client";
 // ---------------------------------------------------------------------------
 // Instance Chat Page — Main chat view for a specific Claude Code instance
+// Supports horizontal swipe gestures to navigate between instances
 // ---------------------------------------------------------------------------
 
 import { use, useMemo } from "react";
 import { ChatView } from "@/components/hub/chat-view";
 import { useHubRealtime } from "@/lib/hub-context";
+import { useSwipeNavigation } from "@/lib/use-swipe-navigation";
 
 interface InstancePageProps {
   params: Promise<{ id: string }>;
@@ -26,6 +28,20 @@ export default function InstancePage({ params }: InstancePageProps) {
     denyPermission,
     loadMessages,
   } = useHubRealtime();
+
+  // Get sorted instance IDs for swipe navigation
+  const sortedInstanceIds = useMemo(
+    () => instances
+      .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999))
+      .map((i) => i.id),
+    [instances]
+  );
+
+  // Swipe navigation between instances
+  const { swipeState, canSwipeLeft, canSwipeRight } = useSwipeNavigation(
+    sortedInstanceIds,
+    instanceId
+  );
 
   const instance = useMemo(
     () => instances.find((i) => i.id === instanceId),
@@ -63,18 +79,51 @@ export default function InstancePage({ params }: InstancePageProps) {
   }
 
   return (
-    <ChatView
-      instance={instance}
-      messages={messages}
-      pendingPermissions={pendingPermissions}
-      connectionError={connectionError}
-      onClearError={clearError}
-      onSendMessage={sendMessage}
-      onRetryMessage={retryMessage}
-      onInterrupt={interrupt}
-      onApprovePermission={approvePermission}
-      onDenyPermission={denyPermission}
-      onLoadMessages={loadMessages}
-    />
+    <div className="relative flex-1 flex flex-col overflow-hidden">
+      {/* Swipe indicator - left edge (swipe right to go to previous) */}
+      {canSwipeRight && swipeState.swiping && swipeState.direction === "right" && (
+        <div
+          className="absolute left-0 top-0 bottom-0 z-50 flex items-center justify-center pointer-events-none"
+          style={{
+            width: Math.abs(swipeState.offset),
+            background: "linear-gradient(to right, rgba(59, 130, 246, 0.2), transparent)"
+          }}
+        >
+          <svg className="w-6 h-6 text-hub-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          </svg>
+        </div>
+      )}
+
+      {/* Swipe indicator - right edge (swipe left to go to next) */}
+      {canSwipeLeft && swipeState.swiping && swipeState.direction === "left" && (
+        <div
+          className="absolute right-0 top-0 bottom-0 z-50 flex items-center justify-center pointer-events-none"
+          style={{
+            width: Math.abs(swipeState.offset),
+            background: "linear-gradient(to left, rgba(59, 130, 246, 0.2), transparent)"
+          }}
+        >
+          <svg className="w-6 h-6 text-hub-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+          </svg>
+        </div>
+      )}
+
+      {/* Main chat view */}
+      <ChatView
+        instance={instance}
+        messages={messages}
+        pendingPermissions={pendingPermissions}
+        connectionError={connectionError}
+        onClearError={clearError}
+        onSendMessage={sendMessage}
+        onRetryMessage={retryMessage}
+        onInterrupt={interrupt}
+        onApprovePermission={approvePermission}
+        onDenyPermission={denyPermission}
+        onLoadMessages={loadMessages}
+      />
+    </div>
   );
 }

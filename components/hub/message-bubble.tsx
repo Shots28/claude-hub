@@ -1,11 +1,12 @@
 "use client";
 // ---------------------------------------------------------------------------
 // MessageBubble — Single message display
+// Now uses ActivityItem for tool calls to show a richer activity feed
 // ---------------------------------------------------------------------------
 
 import { useState, useCallback } from "react";
 import { StreamingText } from "./streaming-text";
-import { ToolCallBlock } from "./tool-call-block";
+import { ActivityItem } from "./activity-item";
 import type { UiMessage } from "@/lib/types";
 
 interface MessageBubbleProps {
@@ -40,27 +41,9 @@ export function MessageBubble({
     }
   }, [message.content]);
 
-  // Tool call blocks are rendered inline with better spacing
+  // Tool call blocks are rendered as activity items for a richer feed
   if (isTool) {
-    let parsedInput: Record<string, unknown> = {};
-    try {
-      parsedInput = JSON.parse(message.content);
-    } catch {
-      // content might be plain output text
-    }
-
-    return (
-      <div className="px-4 py-2">
-        <ToolCallBlock
-          toolName={message.tool_name!}
-          toolId={message.tool_id ?? ""}
-          input={typeof parsedInput === "object" ? parsedInput : undefined}
-          output={message.content}
-          isError={message.is_error}
-          onViewPlan={onViewPlan}
-        />
-      </div>
-    );
+    return <ActivityItem message={message} onViewPlan={onViewPlan} />;
   }
 
   // System messages

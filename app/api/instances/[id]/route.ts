@@ -75,12 +75,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
   try {
     const body = await req.json();
-    const { name, permissionMode, allowedTools, sortOrder, current_session_id } = body as {
+    const { name, permissionMode, allowedTools, sortOrder, current_session_id, model, max_thinking_tokens } = body as {
       name?: string;
       permissionMode?: PermissionMode;
       allowedTools?: string[];
       sortOrder?: number;
       current_session_id?: string | null;
+      model?: string;
+      max_thinking_tokens?: number;
     };
 
     // Build update payload — only include provided fields
@@ -90,6 +92,16 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (allowedTools !== undefined) updates.allowed_tools = allowedTools;
     if (sortOrder !== undefined) updates.sort_order = sortOrder;
     if ("current_session_id" in body) updates.current_session_id = current_session_id ?? null;
+    if (model !== undefined) {
+      // Validate model value
+      const validModels = ["opus", "sonnet", "haiku"];
+      if (validModels.includes(model)) {
+        updates.model = model;
+      }
+    }
+    if (max_thinking_tokens !== undefined) {
+      updates.max_thinking_tokens = max_thinking_tokens;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json(

@@ -9,6 +9,7 @@ import Link from "next/link";
 import { InstanceSidebar } from "@/components/hub/instance-sidebar";
 import { InstanceListMobile } from "@/components/hub/instance-list-mobile";
 import { CreateInstanceModal } from "@/components/hub/create-instance-modal";
+import { UnifiedInbox } from "@/components/hub/unified-inbox";
 import {
   HubRealtimeProvider,
   useHubRealtime,
@@ -20,6 +21,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const realtime = useHubRealtime();
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [mobileCreateOpen, setMobileCreateOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
 
   // Extract active instance ID from path
   const activeInstanceId = pathname.startsWith("/instances/")
@@ -65,7 +67,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setMobileListOpen(true)}
-            className={`relative flex items-center justify-center gap-2 h-10 px-4 rounded-full transition-all ${
+            className={`relative flex items-center justify-center gap-2 h-10 px-3 rounded-full transition-all ${
               mobileListOpen
                 ? "bg-hub-accent/15 text-hub-accent"
                 : "text-hub-text-muted hover:text-hub-text active:bg-hub-surface-2"
@@ -75,6 +77,22 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
             </svg>
             <span className="text-xs font-medium">Chats</span>
+          </button>
+
+          {/* Inbox tab - shows all pending items */}
+          <button
+            type="button"
+            onClick={() => setInboxOpen(true)}
+            className={`relative flex items-center justify-center gap-2 h-10 px-3 rounded-full transition-all ${
+              inboxOpen
+                ? "bg-hub-accent/15 text-hub-accent"
+                : "text-hub-text-muted hover:text-hub-text active:bg-hub-surface-2"
+            }`}
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z" />
+            </svg>
+            <span className="text-xs font-medium">Inbox</span>
             {totalAttention > 0 && (
               <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1">
                 {totalAttention > 9 ? "9+" : totalAttention}
@@ -86,9 +104,9 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           <button
             type="button"
             onClick={() => setMobileCreateOpen(true)}
-            className="flex items-center justify-center w-12 h-12 rounded-full bg-hub-accent hover:bg-hub-accent-hover active:scale-95 transition-all shadow-lg"
+            className="flex items-center justify-center w-11 h-11 rounded-full bg-hub-accent hover:bg-hub-accent-hover active:scale-95 transition-all shadow-lg"
           >
-            <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </button>
@@ -96,7 +114,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           {/* Settings tab */}
           <Link
             href="/settings"
-            className={`flex items-center justify-center gap-2 h-10 px-4 rounded-full transition-all ${
+            className={`flex items-center justify-center gap-2 h-10 px-3 rounded-full transition-all ${
               activeTab === "settings"
                 ? "bg-hub-accent/15 text-hub-accent"
                 : "text-hub-text-muted hover:text-hub-text active:bg-hub-surface-2"
@@ -130,6 +148,17 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           window.location.href = `/instances/${instanceId}`;
         }}
         existingNames={realtime.instances.map((i) => i.name)}
+      />
+
+      {/* Unified inbox panel */}
+      <UnifiedInbox
+        instances={realtime.instances}
+        messages={realtime.messages}
+        pendingPermissions={realtime.pendingPermissions}
+        onApprove={realtime.approvePermission}
+        onDeny={realtime.denyPermission}
+        open={inboxOpen}
+        onClose={() => setInboxOpen(false)}
       />
     </div>
   );

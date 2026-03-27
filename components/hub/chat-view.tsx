@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageList } from "./message-list";
-import { ChatInput } from "./chat-input";
+import { ChatInput, type Attachment } from "./chat-input";
 import { PermissionBanner } from "./permission-banner";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ErrorBanner } from "./error-banner";
@@ -30,11 +30,19 @@ const PERMISSION_MODES: { value: PermissionMode; short: string; color: string; b
   { value: "default", short: "Ask", color: "bg-neutral-500/15 text-neutral-400 border-neutral-500/30", borderColor: "border-hub-border" },
 ];
 
-// Effort levels config
+// Effort levels config - 4 levels matching Claude Code's budget_tokens options
 const EFFORT_LEVELS: { value: string; short: string; tokens: number }[] = [
   { value: "low", short: "Quick", tokens: 1024 },
-  { value: "medium", short: "Normal", tokens: 8192 },
-  { value: "high", short: "Deep", tokens: 32768 },
+  { value: "medium", short: "Normal", tokens: 10000 },
+  { value: "high", short: "Deep", tokens: 50000 },
+  { value: "max", short: "Max", tokens: 128000 },
+];
+
+// Model config
+const MODELS: { value: string; short: string; color: string }[] = [
+  { value: "opus", short: "Opus", color: "bg-purple-500/15 text-purple-400 border-purple-500/30" },
+  { value: "sonnet", short: "Sonnet", color: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
+  { value: "haiku", short: "Haiku", color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
 ];
 
 function getModeConfig(mode: PermissionMode) {
@@ -43,8 +51,13 @@ function getModeConfig(mode: PermissionMode) {
 
 function getEffortFromTokens(tokens: number): string {
   if (tokens <= 2048) return "low";
-  if (tokens <= 16384) return "medium";
-  return "high";
+  if (tokens <= 20000) return "medium";
+  if (tokens <= 80000) return "high";
+  return "max";
+}
+
+function getModelConfig(model: string) {
+  return MODELS.find(m => m.value === model) || MODELS[1]; // default to sonnet
 }
 
 interface ChatViewProps {
@@ -102,6 +115,7 @@ export function ChatView({
   const [clearingSession, setClearingSession] = useState(false);
   const [updatingMode, setUpdatingMode] = useState(false);
   const [updatingEffort, setUpdatingEffort] = useState(false);
+  const [updatingModel, setUpdatingModel] = useState(false);
   const bridgeStatus = useBridgeStatus();
 
   // File viewer / plan viewer / file activity state
@@ -138,8 +152,18 @@ export function ChatView({
     setStreamingId(streamingMsg?.id ?? null);
   }, [instanceMessages]);
 
-  const handleSend = useCallback(async (text: string) => {
-    await onSendMessage(instance.id, text);
+  const handleSend = useCallback(async (text: string, attachments?: Attachment[]) => {
+    // TODO: Handle file attachments - for now just send the text
+    // When attachments are provided, they would need to be uploaded and their
+    // references included in the message
+    if (attachments && attachments.length > 0) {
+      console.log("[ChatView] Attachments received:", attachments.map(a => a.name));
+      // For now, include attachment names in the message
+      const attachmentInfo = attachments.map(a => `[Attached: ${a.name}]`).join(" ");
+      await onSendMessage(instance.id, `${text}\n\n${attachmentInfo}`);
+    } else {
+      await onSendMessage(instance.id, text);
+    }
   }, [instance.id, onSendMessage]);
 
   const handleInterrupt = useCallback(() => {
@@ -202,6 +226,34 @@ export function ChatView({
     }
   }, [instance.id, currentEffort, updatingEffort]);
 
+  // Model state
+  const [optimisticModel, setOptimisticModel] = useState<string | null>(null);
+  const currentModel = optimisticModel ?? (instance.model || "sonnet");
+
+  useEffect(() => {
+    setOptimisticModel(null);
+  }, [instance.model]);
+
+  const handleModelCycle = useCallback(async () => {
+    if (updatingModel) return;
+    const currentIndex = MODELS.findIndex(m => m.value === currentModel);
+    const nextIndex = (currentIndex + 1) % MODELS.length;
+    const nextModel = MODELS[nextIndex];
+    setOptimisticModel(nextModel.value);
+    setUpdatingModel(true);
+    try {
+      await fetch(`/api/instances/${instance.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: nextModel.value }),
+      });
+    } catch {
+      setOptimisticModel(null);
+    } finally {
+      setUpdatingModel(false);
+    }
+  }, [instance.id, currentModel, updatingModel]);
+
   // New Chat handler
   const handleNewChat = useCallback(async () => {
     if (clearingSession) return;
@@ -222,6 +274,7 @@ export function ChatView({
 
   const modeConfig = getModeConfig(currentMode);
   const effortConfig = EFFORT_LEVELS.find(e => e.value === currentEffort) || EFFORT_LEVELS[1];
+  const modelConfig = getModelConfig(currentModel);
   const isRunning = instance.status === "running";
   const isQueued = instance.status === "queued";
   const isBusy = isRunning || isQueued;
@@ -296,10 +349,16 @@ export function ChatView({
               {updatingEffort ? "..." : effortConfig.short}
             </button>
 
-            {/* Model indicator (non-interactive) */}
-            <span className="px-2.5 py-1 rounded-full text-xs text-hub-text-muted/60 bg-hub-surface-2">
-              {instance.model || "sonnet"}
-            </span>
+            {/* Model pill - clearly tappable */}
+            <button
+              type="button"
+              onClick={handleModelCycle}
+              disabled={updatingModel}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all active:scale-95 disabled:opacity-50 ${modelConfig.color}`}
+              title="Tap to change model"
+            >
+              {updatingModel ? "..." : modelConfig.short}
+            </button>
 
             {/* File activity - if any */}
             {fileActivity.length > 0 && (

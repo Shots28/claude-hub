@@ -1,13 +1,22 @@
 "use client";
 // ---------------------------------------------------------------------------
 // ChatInput — Clean input with contextual action buttons
+// Supports file upload and image paste
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InstanceStatus } from "@/lib/types";
 
+export interface Attachment {
+  id: string;
+  type: "file" | "image";
+  name: string;
+  preview?: string;
+  file: File;
+}
+
 interface ChatInputProps {
-  onSend: (text: string) => Promise<void>;
+  onSend: (text: string, attachments?: Attachment[]) => Promise<void>;
   onInterrupt: () => void;
   instanceStatus: InstanceStatus;
   disabled?: boolean;
@@ -24,7 +33,9 @@ export function ChatInput({
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
@@ -32,6 +43,8 @@ export function ChatInput({
   const isQueued = instanceStatus === "queued";
   const isBusy = isRunning || isQueued;
   const hasText = text.trim().length > 0;
+  const hasAttachments = attachments.length > 0;
+  const canSend = hasText || hasAttachments;
 
   // Auto-resize textarea
   const adjustHeight = useCallback(() => {
@@ -51,19 +64,82 @@ export function ChatInput({
 
   const handleSend = async () => {
     const trimmed = text.trim().replace(/\0/g, "");
-    if (!trimmed || trimmed.length > 50000) return;
+    if ((!trimmed && attachments.length === 0) || trimmed.length > 50000) return;
 
+    const currentAttachments = [...attachments];
     setText("");
+    setAttachments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
     try {
-      await onSend(trimmed);
+      await onSend(trimmed, currentAttachments.length > 0 ? currentAttachments : undefined);
     } catch {
       // Error handling is in use-realtime.ts
     }
   };
+
+  // File upload handler
+  const handleFileSelect = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const newAttachments: Attachment[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const isImage = file.type.startsWith("image/");
+      const attachment: Attachment = {
+        id: `${Date.now()}-${i}`,
+        type: isImage ? "image" : "file",
+        name: file.name,
+        file,
+      };
+
+      // Create preview for images
+      if (isImage) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setAttachments(prev => prev.map(a =>
+            a.id === attachment.id
+              ? { ...a, preview: e.target?.result as string }
+              : a
+          ));
+        };
+        reader.readAsDataURL(file);
+      }
+
+      newAttachments.push(attachment);
+    }
+
+    setAttachments(prev => [...prev, ...newAttachments]);
+  }, []);
+
+  // Paste handler for images
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageItems: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageItems.push(file);
+      }
+    }
+
+    if (imageItems.length > 0) {
+      e.preventDefault();
+      const fileList = new DataTransfer();
+      imageItems.forEach(f => fileList.items.add(f));
+      handleFileSelect(fileList.files);
+    }
+  }, [handleFileSelect]);
+
+  // Remove attachment
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -143,6 +219,54 @@ export function ChatInput({
   return (
     <div className="border-t border-hub-border bg-hub-bg px-3 py-2.5 safe-area-bottom">
       <div className="max-w-3xl mx-auto">
+        {/* Attachments preview */}
+        {attachments.length > 0 && (
+          <div className="flex gap-2 mb-2 flex-wrap">
+            {attachments.map((attachment) => (
+              <div
+                key={attachment.id}
+                className="relative group bg-hub-surface-2 rounded-lg border border-hub-border overflow-hidden"
+              >
+                {attachment.type === "image" && attachment.preview ? (
+                  <img
+                    src={attachment.preview}
+                    alt={attachment.name}
+                    className="w-16 h-16 object-cover"
+                  />
+                ) : (
+                  <div className="w-16 h-16 flex flex-col items-center justify-center p-2">
+                    <svg className="w-6 h-6 text-hub-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    </svg>
+                    <span className="text-[9px] text-hub-text-muted truncate max-w-full mt-0.5">
+                      {attachment.name.slice(0, 8)}
+                    </span>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(attachment.id)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.txt,.md,.json,.yml,.yaml,.xml,.csv,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.css,.scss,.html"
+          onChange={(e) => handleFileSelect(e.target.files)}
+          className="hidden"
+        />
+
         {/* Input container with integrated buttons */}
         <div className={`flex items-end gap-2 bg-hub-surface-2 rounded-2xl border transition-colors ${modeBorderClass}`}>
           {/* Text input */}
@@ -151,6 +275,7 @@ export function ChatInput({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               transcribing
                 ? "Transcribing..."
@@ -158,7 +283,7 @@ export function ChatInput({
                   ? "Recording..."
                   : isBusy
                     ? "Queue a message..."
-                    : "Message..."
+                    : "Message... (paste images or attach files)"
             }
             disabled={disabled}
             rows={1}
@@ -167,6 +292,21 @@ export function ChatInput({
 
           {/* Action buttons container */}
           <div className="flex items-center gap-1 pr-2 pb-1.5">
+            {/* Attach file button - when not busy */}
+            {!isBusy && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-hub-border text-hub-text-muted hover:text-hub-text hover:bg-hub-text-muted/20 transition-colors disabled:opacity-50"
+                aria-label="Attach file"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                </svg>
+              </button>
+            )}
+
             {/* Stop button - only when busy */}
             {isBusy && (
               <button
@@ -181,8 +321,8 @@ export function ChatInput({
               </button>
             )}
 
-            {/* Mic button - when not busy and no text */}
-            {!isBusy && !hasText && (
+            {/* Mic button - when not busy and no text/attachments */}
+            {!isBusy && !canSend && (
               <button
                 type="button"
                 onClick={toggleRecording}
@@ -206,14 +346,14 @@ export function ChatInput({
               </button>
             )}
 
-            {/* Send button - always visible when there's text */}
-            {(hasText || isBusy) && (
+            {/* Send button - always visible when there's text or attachments */}
+            {(canSend || isBusy) && (
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={!hasText}
+                disabled={!canSend}
                 className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${
-                  hasText
+                  canSend
                     ? "bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 text-white"
                     : "bg-hub-border text-hub-text-muted/30"
                 }`}

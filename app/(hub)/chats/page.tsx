@@ -136,7 +136,9 @@ function ChatsPageContent() {
                       )}
                     </div>
                     {needsAtt && (
-                      <span className="w-3 h-3 rounded-full bg-orange-400 animate-pulse flex-shrink-0" />
+                      <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white px-1.5 flex-shrink-0">
+                        !
+                      </span>
                     )}
                     <svg className="w-5 h-5 text-hub-text-muted/40 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
@@ -166,7 +168,9 @@ function ChatsPageContent() {
                       {inst.name}
                     </span>
                     {needsAtt && (
-                      <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1">
+                        !
+                      </span>
                     )}
                   </div>
                   {inst.last_message_preview && (
@@ -232,7 +236,7 @@ function ChatsPageContent() {
           <div className="text-sm text-hub-text-muted/60 text-center">
             {realtime.instances.length} chat{realtime.instances.length !== 1 ? "s" : ""}
             {totalAttention > 0 && (
-              <span className="text-orange-400"> · {totalAttention} need attention</span>
+              <span className="text-red-400 font-medium"> · {totalAttention} need attention</span>
             )}
           </div>
         </div>

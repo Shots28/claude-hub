@@ -42,11 +42,13 @@ export async function GET(req: NextRequest, context: RouteContext) {
   }
 
   try {
+    console.log("[messages/GET] Fetching messages for instance:", id);
+
     // Fetch from chat_messages (the realtime table, not the cache)
     // Use a higher limit to ensure we get all recent messages
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("chat_messages")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("instance_id", id)
       .order("created_at", { ascending: true })
       .limit(500);
@@ -59,7 +61,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
       );
     }
 
-    console.log(`[messages/GET] Returning ${data?.length ?? 0} messages for instance ${id}`);
+    console.log(`[messages/GET] Returning ${data?.length ?? 0} messages (total count: ${count}) for instance ${id}`);
     // Debug: Log first few messages to verify data structure
     if (data && data.length > 0) {
       const sample = data.slice(0, 3).map((m: any) => ({
@@ -74,7 +76,15 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
     // Return with cache-control headers to prevent stale data
     return NextResponse.json(
-      { messages: data ?? [] },
+      {
+        messages: data ?? [],
+        _debug: {
+          fetchedAt: new Date().toISOString(),
+          instanceId: id,
+          returnedCount: data?.length ?? 0,
+          totalCount: count,
+        }
+      },
       {
         status: 200,
         headers: {
@@ -133,6 +143,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
 
     // Insert into chat_messages (the realtime table)
+    console.log("[messages/POST] Inserting user message for instance:", id, "content length:", content.length);
     const { data, error } = await (supabase.from("chat_messages") as any)
       .insert({
         instance_id: id,
@@ -150,6 +161,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
         { status: 500 },
       );
     }
+
+    console.log("[messages/POST] User message inserted successfully, id:", data?.id);
 
     // Only update status to "queued" if instance is idle/stopped
     // If already running or queued, leave status alone (message will be processed in order)

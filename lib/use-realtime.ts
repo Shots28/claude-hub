@@ -99,6 +99,9 @@ export function useRealtime(): RealtimeState {
         const data = await res.json();
         const newMsgs: UiMessage[] = data.messages ?? [];
         console.log("[realtime] loadMessages received:", newMsgs.length, "messages for instance", instanceId);
+        if (data._debug) {
+          console.log("[realtime] API debug:", data._debug);
+        }
         if (newMsgs.length > 0) {
           console.log("[realtime] First message:", newMsgs[0]?.id, newMsgs[0]?.role);
           console.log("[realtime] Last message:", newMsgs[newMsgs.length - 1]?.id, newMsgs[newMsgs.length - 1]?.role);
@@ -453,14 +456,21 @@ export function useRealtime(): RealtimeState {
           if (res.ok) {
             // Replace optimistic message with real one (delivered)
             const data = await res.json();
+            console.log("[realtime] sendMessage success, got message:", data.message?.id, "instance_id:", data.message?.instance_id);
             if (data.message) {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === optimisticId
-                    ? { ...data.message, deliveryStatus: "delivered" as const }
-                    : m,
-                ),
-              );
+              // Ensure message has instance_id (should come from DB, but verify)
+              const savedMessage = {
+                ...data.message,
+                instance_id: data.message.instance_id || instanceId,
+                deliveryStatus: "delivered" as const,
+              };
+              setMessages((prev) => {
+                const found = prev.find(m => m.id === optimisticId);
+                console.log("[realtime] Replacing optimistic message, found:", !!found, "optimisticId:", optimisticId);
+                return prev.map((m) =>
+                  m.id === optimisticId ? savedMessage : m,
+                );
+              });
             }
             // Reset retry count on success
             sendRetryCountRef.current = 0;

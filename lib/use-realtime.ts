@@ -77,7 +77,14 @@ export function useRealtime(): RealtimeState {
       });
       if (res.ok) {
         const data = await res.json();
-        setMessages(data.messages ?? []);
+        const newMsgs: UiMessage[] = data.messages ?? [];
+        // Merge with existing messages instead of replacing
+        // This preserves messages from other instances when switching
+        setMessages((prev) => {
+          // Remove old messages for this instance, keep others
+          const otherInstanceMsgs = prev.filter(m => m.instance_id !== instanceId);
+          return [...otherInstanceMsgs, ...newMsgs];
+        });
       }
     } catch {
       // silently fail

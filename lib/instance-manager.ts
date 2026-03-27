@@ -276,6 +276,9 @@ export class InstanceManager extends EventEmitter {
     let currentMsgId = assistantMsgId;
     let turnText = "";
 
+    // Track current tool being built (input comes via deltas)
+    let currentTool: { id: string; name: string; inputJson: string } | null = null;
+
     let errorOccurred = false;
     try {
       // Dynamic import for the SDK (may not be available in all environments)
@@ -467,30 +470,50 @@ export class InstanceManager extends EventEmitter {
                   .update({ content: turnText, status: "streaming" })
                   .eq("id", currentMsgId);
               }
+            } else if (delta?.type === "input_json_delta" && delta.partial_json && currentTool) {
+              // Accumulate tool input JSON
+              currentTool.inputJson += delta.partial_json;
             }
           } else if (streamEvent?.type === "content_block_start") {
             if (streamEvent.content_block?.type === "tool_use") {
               const toolName = streamEvent.content_block.name;
               const toolId = streamEvent.content_block.id;
 
+              // Start tracking this tool - input will come via deltas
+              currentTool = { id: toolId, name: toolName, inputJson: "" };
+
               this.emit("tool_start", instanceId, {
                 toolCallId: toolId,
                 toolName,
                 toolInput: {},
               });
+            }
+          } else if (streamEvent?.type === "content_block_stop") {
+            // Tool input is complete - store the tool message
+            if (currentTool) {
+              let toolInput = {};
+              try {
+                if (currentTool.inputJson) {
+                  toolInput = JSON.parse(currentTool.inputJson);
+                }
+              } catch {
+                // If JSON parsing fails, store as-is
+                toolInput = { raw: currentTool.inputJson };
+              }
 
-              // Store tool call as a separate message so it shows in the chat
               await this.supabase
                 .from("chat_messages")
                 .insert({
                   instance_id: instanceId,
                   role: "assistant",
-                  content: JSON.stringify(streamEvent.content_block.input || {}),
-                  tool_name: toolName,
-                  tool_id: toolId,
+                  content: JSON.stringify(toolInput),
+                  tool_name: currentTool.name,
+                  tool_id: currentTool.id,
                   is_error: false,
                   status: "done",
                 });
+
+              currentTool = null;
             }
           }
         } else if (event.type === "result") {

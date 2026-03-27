@@ -60,71 +60,74 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      {/* Mobile bottom nav - Clean and minimal */}
+      {/* Mobile bottom nav - Taller with centered plus */}
       <nav className="md:hidden flex-shrink-0 border-t border-hub-border bg-hub-bg safe-area-bottom">
-        <div className="flex items-center justify-around h-12 max-w-md mx-auto px-4">
-          {/* Instances tab */}
+        <div className="relative flex items-center justify-between h-16 max-w-md mx-auto px-6">
+          {/* Left side: Chats */}
           <button
             type="button"
             onClick={() => setMobileListOpen(true)}
-            className={`relative flex items-center justify-center gap-2 h-10 px-3 rounded-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
               mobileListOpen
                 ? "bg-hub-accent/15 text-hub-accent"
-                : "text-hub-text-muted hover:text-hub-text active:bg-hub-surface-2"
+                : "text-hub-text-muted active:bg-hub-surface-2"
             }`}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
             </svg>
-            <span className="text-xs font-medium">Chats</span>
+            <span className="text-[10px] font-medium">Chats</span>
           </button>
 
-          {/* Inbox tab - shows all pending items */}
+          {/* Left-center: Inbox */}
           <button
             type="button"
             onClick={() => setInboxOpen(true)}
-            className={`relative flex items-center justify-center gap-2 h-10 px-3 rounded-full transition-all ${
+            className={`relative flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
               inboxOpen
                 ? "bg-hub-accent/15 text-hub-accent"
-                : "text-hub-text-muted hover:text-hub-text active:bg-hub-surface-2"
+                : "text-hub-text-muted active:bg-hub-surface-2"
             }`}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z" />
             </svg>
-            <span className="text-xs font-medium">Inbox</span>
+            <span className="text-[10px] font-medium">Inbox</span>
             {totalAttention > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1">
+              <span className="absolute top-1 right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1">
                 {totalAttention > 9 ? "9+" : totalAttention}
               </span>
             )}
           </button>
 
-          {/* New Instance - prominent center button */}
+          {/* Center: New Instance - absolutely centered */}
           <button
             type="button"
             onClick={() => setMobileCreateOpen(true)}
-            className="flex items-center justify-center w-11 h-11 rounded-full bg-hub-accent hover:bg-hub-accent-hover active:scale-95 transition-all shadow-lg"
+            className="absolute left-1/2 -translate-x-1/2 -top-4 flex items-center justify-center w-14 h-14 rounded-full bg-hub-accent hover:bg-hub-accent-hover active:scale-95 transition-all shadow-lg border-4 border-hub-bg"
           >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </button>
 
-          {/* Settings tab */}
+          {/* Right-center: placeholder for symmetry */}
+          <div className="w-14" />
+
+          {/* Right side: Settings */}
           <Link
             href="/settings"
-            className={`flex items-center justify-center gap-2 h-10 px-3 rounded-full transition-all ${
+            className={`flex flex-col items-center justify-center gap-0.5 h-14 px-4 rounded-2xl transition-colors active:scale-95 ${
               activeTab === "settings"
                 ? "bg-hub-accent/15 text-hub-accent"
-                : "text-hub-text-muted hover:text-hub-text active:bg-hub-surface-2"
+                : "text-hub-text-muted active:bg-hub-surface-2"
             }`}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            <span className="text-xs font-medium">Settings</span>
+            <span className="text-[10px] font-medium">Settings</span>
           </Link>
         </div>
       </nav>

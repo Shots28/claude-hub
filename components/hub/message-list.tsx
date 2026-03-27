@@ -3,7 +3,7 @@
 // MessageList — Scrollable list of messages with auto-scroll
 // ---------------------------------------------------------------------------
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { MessageBubble } from "./message-bubble";
 import type { UiMessage } from "@/lib/types";
 
@@ -57,16 +57,25 @@ export function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isAutoScroll = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Check if user has scrolled up
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const threshold = 100;
     const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     isAutoScroll.current = atBottom;
-  };
+    setShowScrollButton(!atBottom);
+  }, []);
+
+  // Scroll to bottom handler
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    setShowScrollButton(false);
+    isAutoScroll.current = true;
+  }, []);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -129,7 +138,7 @@ export function MessageList({
 
     if (isNewTurn) {
       elements.push(
-        <div key={`turn-sep-${msg.id}`} className="h-3" aria-hidden="true" />
+        <div key={`turn-sep-${msg.id}`} className="h-1" aria-hidden="true" />
       );
     }
 
@@ -148,13 +157,29 @@ export function MessageList({
   }
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={handleScroll}
-      className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-4"
-    >
-      {elements}
-      <div ref={bottomRef} />
+    <div className="relative flex-1 flex flex-col overflow-hidden">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto scroll-smooth-chat scrollbar-hide py-4 space-y-1"
+      >
+        {elements}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Scroll to bottom button */}
+      {showScrollButton && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-4 w-10 h-10 rounded-full bg-hub-surface-2 border border-hub-border shadow-lg flex items-center justify-center text-hub-text-muted hover:text-hub-text hover:bg-hub-surface active:scale-95 transition-all z-10"
+          aria-label="Scroll to bottom"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

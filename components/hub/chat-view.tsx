@@ -12,6 +12,7 @@ import { ErrorBanner } from "./error-banner";
 import { FileViewer } from "./file-viewer";
 import { PlanViewer } from "./plan-viewer";
 import { FileActivity } from "./file-activity";
+import { TaskPanel, useTaskCount } from "./task-panel";
 import { useBridgeStatus } from "@/lib/use-bridge-status";
 import { useFileActivity } from "@/lib/use-file-activity";
 import type {
@@ -118,10 +119,12 @@ export function ChatView({
   const [updatingModel, setUpdatingModel] = useState(false);
   const bridgeStatus = useBridgeStatus();
 
-  // File viewer / plan viewer / file activity state
+  // File viewer / plan viewer / file activity / tasks state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [viewingPlan, setViewingPlan] = useState<string | null>(null);
   const [showFileActivity, setShowFileActivity] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
+  const taskCount = useTaskCount();
 
   // Load messages when instance changes OR component mounts
   const retryCountRef = useRef(0);
@@ -385,6 +388,18 @@ export function ChatView({
                 {fileActivity.length}
               </button>
             )}
+
+            {/* Tasks */}
+            <button
+              type="button"
+              onClick={() => setShowTasks(true)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/30 transition-all"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Tasks{taskCount > 0 && ` (${taskCount})`}
+            </button>
           </div>
         </div>
       </div>
@@ -459,6 +474,15 @@ export function ChatView({
           onClose={() => setShowFileActivity(false)}
         />
       )}
+
+      {/* Task panel */}
+      <TaskPanel
+        open={showTasks}
+        onClose={() => setShowTasks(false)}
+        onPushToChat={(text) => {
+          handleSend(text);
+        }}
+      />
     </div>
   );
 }

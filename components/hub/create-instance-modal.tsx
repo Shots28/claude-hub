@@ -6,7 +6,6 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
-import type { PermissionMode } from "@/lib/types";
 
 interface CreateInstanceModalProps {
   open: boolean;
@@ -29,10 +28,6 @@ export function CreateInstanceModal({
 }: CreateInstanceModalProps) {
   const [name, setName] = useState("");
   const [repoPath, setRepoPath] = useState("");
-  const [permissionMode, setPermissionMode] =
-    useState<PermissionMode>("bypassPermissions");
-  const [model, setModel] = useState("opus");
-  const [extendedThinking, setExtendedThinking] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,9 +153,9 @@ export function CreateInstanceModal({
           body: JSON.stringify({
             name: name.trim(),
             repoPath: repoPath.trim(),
-            permissionMode,
-            model,
-            extendedThinking,
+            permissionMode: "bypassPermissions",
+            model: "opus",
+            extendedThinking: true,
           }),
         });
 
@@ -175,9 +170,6 @@ export function CreateInstanceModal({
         // Reset form
         setName("");
         setRepoPath("");
-        setPermissionMode("bypassPermissions");
-        setModel("sonnet");
-        setExtendedThinking(false);
         setSearchQuery("");
         setShowManual(false);
         onCreated(data.instance.id);
@@ -188,7 +180,7 @@ export function CreateInstanceModal({
         setLoading(false);
       }
     },
-    [name, repoPath, permissionMode, model, extendedThinking, onCreated, onClose],
+    [name, repoPath, onCreated, onClose],
   );
 
   if (!open) return null;
@@ -466,94 +458,6 @@ export function CreateInstanceModal({
               </button>
             </>
           )}
-
-          {/* Permission mode */}
-          <div>
-            <label
-              htmlFor="instance-permission"
-              className="block text-xs font-medium text-hub-text-muted mb-1.5"
-            >
-              Permission mode
-            </label>
-            <div className="space-y-2">
-              {([
-                {
-                  value: "bypassPermissions" as const,
-                  label: "Bypass all permissions",
-                  desc: "Full autonomy — no approval needed",
-                },
-                {
-                  value: "acceptEdits" as const,
-                  label: "Auto-accept edits",
-                  desc: "Approve file changes, ask for other tools",
-                },
-                {
-                  value: "plan" as const,
-                  label: "Plan mode",
-                  desc: "Create a plan first, then execute with approval",
-                },
-                {
-                  value: "default" as const,
-                  label: "Ask for approval",
-                  desc: "Prompt before any tool use",
-                },
-              ]).map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${
-                    permissionMode === opt.value
-                      ? "bg-hub-accent/10 border-hub-accent/30"
-                      : "bg-hub-surface-2 border-hub-border hover:border-hub-text-muted/30"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="permissionMode"
-                    value={opt.value}
-                    checked={permissionMode === opt.value}
-                    onChange={() => setPermissionMode(opt.value)}
-                    className="mt-0.5 accent-blue-500"
-                  />
-                  <div>
-                    <div className={`text-sm font-medium ${permissionMode === opt.value ? "text-hub-accent" : "text-hub-text"}`}>
-                      {opt.label}
-                    </div>
-                    <div className="text-xs text-hub-text-muted">{opt.desc}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Model */}
-          <div>
-            <label className="block text-xs font-medium text-hub-text-muted mb-1.5">
-              Model
-            </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full bg-hub-surface-2 border border-hub-border rounded-lg px-3 py-2 text-sm text-hub-text focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
-            >
-              <option value="opus">Claude Opus (most capable)</option>
-              <option value="sonnet">Claude Sonnet (fast + smart)</option>
-              <option value="haiku">Claude Haiku (fastest)</option>
-            </select>
-          </div>
-
-          {/* Extended thinking */}
-          <label className="flex items-center gap-3 px-3 py-2.5 rounded-lg border bg-hub-surface-2 border-hub-border cursor-pointer">
-            <input
-              type="checkbox"
-              checked={extendedThinking}
-              onChange={(e) => setExtendedThinking(e.target.checked)}
-              className="accent-blue-500"
-            />
-            <div>
-              <div className="text-sm font-medium text-hub-text">Extended thinking</div>
-              <div className="text-xs text-hub-text-muted">Let Claude think deeply before responding</div>
-            </div>
-          </label>
 
           {/* Error */}
           {error && (

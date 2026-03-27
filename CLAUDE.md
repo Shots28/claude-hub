@@ -217,6 +217,24 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 - **Intentional `as any` casts** (`lib/instance-manager.ts`, API routes): Used on `supabase.from()` calls as a workaround — the hand-written `Database` interface doesn't always satisfy Supabase's strict `GenericTable` constraints at compile time, but works correctly at runtime.
 - **Startup cleanup** (`server.ts`): On bridge start, resets stale "running" instances to "queued" and marks orphaned "streaming" messages as "error" with "[Bridge restarted]" content.
 
+## Interactive Tool UI
+
+Certain tool calls display interactive UI elements in the chat:
+
+### ExitPlanMode
+When Claude completes a plan and calls `ExitPlanMode`, the UI displays:
+- **Approve Plan** button — sends "Approved. Please proceed with the implementation."
+- **Request Changes** button — prompts for feedback and sends "Please revise the plan: [feedback]"
+
+### AskUserQuestion
+When Claude asks the user a question via `AskUserQuestion`, the UI displays:
+- Clickable option buttons for each provided choice
+- **Other...** button for custom text input
+- Multi-select support with **Submit Selection** button when `multiSelect` is enabled
+- "Response sent" confirmation after interaction
+
+These interactive elements appear inline with the tool call activity item and auto-hide after the user responds.
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)
@@ -225,3 +243,4 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 - No offline mode — requires active Supabase connection
 - Health metrics on Vercel show serverless stats, not bridge stats
 - No code diff viewer — assistant responses are plain text/markdown
+- Tool outputs (command results, file contents) are not directly displayed — Claude's SDK processes them internally and the results appear in Claude's subsequent text responses

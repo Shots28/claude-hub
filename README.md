@@ -132,6 +132,15 @@ Click the **Tasks** button in the chat header to open the task panel. Use it to:
 
 Tasks are stored locally in your browser (localStorage) and persist across sessions.
 
+### Interactive tool responses
+
+Some tool calls display interactive UI elements directly in the chat:
+
+- **ExitPlanMode** — Shows "Approve Plan" and "Request Changes" buttons when Claude completes a plan
+- **AskUserQuestion** — Displays clickable option buttons, with support for multi-select and custom input via "Other..."
+
+These interactive elements allow you to respond to Claude's questions without typing, making the mobile experience smoother.
+
 ### Permission requests
 
 When `permission_mode` is set to `default`, Claude will request approval for each tool use. A banner appears in the chat UI with approve/deny buttons. Permissions time out after **5 minutes** if not resolved.

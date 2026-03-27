@@ -13,7 +13,7 @@ import {
   HubRealtimeProvider,
   useHubRealtime,
 } from "@/lib/hub-context";
-import { useUnreadCount } from "@/lib/use-unread-count";
+import { useNeedsAttention } from "@/lib/use-needs-attention";
 
 function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -26,9 +26,10 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
     ? pathname.split("/")[2]
     : undefined;
 
-  // Track unread messages per instance
-  const { unreadCounts, totalUnread } = useUnreadCount(
-    realtime.messages,
+  // Track instances needing attention (completed or permission pending)
+  const { needsAttention, totalAttention } = useNeedsAttention(
+    realtime.instances,
+    realtime.pendingPermissions,
     activeInstanceId
   );
 
@@ -84,9 +85,9 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
               />
             </svg>
             <span className="text-[10px] font-medium">Instances</span>
-            {totalUnread > 0 && (
+            {totalAttention > 0 && (
               <span className="absolute top-1 right-1/4 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white px-1">
-                {totalUnread > 99 ? "99+" : totalUnread}
+                {totalAttention > 99 ? "99+" : totalAttention}
               </span>
             )}
           </button>
@@ -152,7 +153,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
         open={mobileListOpen}
         onClose={() => setMobileListOpen(false)}
         onRefresh={handleRefresh}
-        unreadCounts={unreadCounts}
+        needsAttention={needsAttention}
       />
 
       {/* Mobile create instance modal */}

@@ -15,7 +15,7 @@ interface InstanceListMobileProps {
   open: boolean;
   onClose: () => void;
   onRefresh: () => void;
-  unreadCounts?: Record<string, number>;
+  needsAttention?: Record<string, "permission" | "completed">;
 }
 
 function MobileActionMenu({
@@ -102,7 +102,7 @@ export function InstanceListMobile({
   open,
   onClose,
   onRefresh,
-  unreadCounts = {},
+  needsAttention = {},
 }: InstanceListMobileProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
@@ -294,12 +294,14 @@ export function InstanceListMobile({
                           )}
                         </div>
 
-                        {/* Unread badge */}
-                        {(unreadCounts[inst.id] ?? 0) > 0 && (
-                          <span className="flex-shrink-0 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1.5">
-                            {unreadCounts[inst.id] > 99
-                              ? "99+"
-                              : unreadCounts[inst.id]}
+                        {/* Attention indicator */}
+                        {needsAttention[inst.id] && (
+                          <span className={`flex-shrink-0 h-5 flex items-center justify-center rounded-full text-[10px] font-medium text-white px-2 ${
+                            needsAttention[inst.id] === "permission"
+                              ? "bg-orange-500"
+                              : "bg-emerald-500"
+                          }`}>
+                            {needsAttention[inst.id] === "permission" ? "Action" : "Done"}
                           </span>
                         )}
 

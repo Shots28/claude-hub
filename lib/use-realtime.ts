@@ -88,25 +88,44 @@ export function useRealtime(): RealtimeState {
     try {
       const res = await fetch(`/api/instances/${instanceId}/messages`, {
         credentials: "include",
+        // Prevent caching to always get fresh data
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache",
+        },
       });
       console.log("[realtime] loadMessages response status:", res.status);
       if (res.ok) {
         const data = await res.json();
         const newMsgs: UiMessage[] = data.messages ?? [];
-        console.log("[realtime] loadMessages received:", newMsgs.length, "messages");
+        console.log("[realtime] loadMessages received:", newMsgs.length, "messages for instance", instanceId);
+        if (newMsgs.length > 0) {
+          console.log("[realtime] First message:", newMsgs[0]?.id, newMsgs[0]?.role);
+          console.log("[realtime] Last message:", newMsgs[newMsgs.length - 1]?.id, newMsgs[newMsgs.length - 1]?.role);
+          // Debug: Count tool messages and check their content
+          const toolMsgs = newMsgs.filter((m: any) => m.tool_name);
+          console.log("[realtime] Tool messages:", toolMsgs.length);
+          if (toolMsgs.length > 0) {
+            const sample = toolMsgs[0];
+            console.log("[realtime] Sample tool message:", { id: sample.id, tool_name: sample.tool_name, content_preview: sample.content?.slice(0, 100) });
+          }
+        }
         // Merge with existing messages instead of replacing
         // This preserves messages from other instances when switching
         setMessages((prev) => {
           // Remove old messages for this instance, keep others
           const otherInstanceMsgs = prev.filter(m => m.instance_id !== instanceId);
-          console.log("[realtime] setMessages: keeping", otherInstanceMsgs.length, "other msgs, adding", newMsgs.length);
+          console.log("[realtime] setMessages: keeping", otherInstanceMsgs.length, "other instance msgs, adding", newMsgs.length, "for", instanceId);
           return [...otherInstanceMsgs, ...newMsgs];
         });
       } else {
-        console.error("[realtime] loadMessages failed:", res.status, await res.text());
+        const errorText = await res.text();
+        console.error("[realtime] loadMessages failed:", res.status, errorText);
+        setConnectionError(`Failed to load messages: ${res.status}`);
       }
     } catch (err) {
       console.error("[realtime] loadMessages error:", err);
+      setConnectionError(`Failed to load messages: ${err instanceof Error ? err.message : "Network error"}`);
     }
   }, []);
 

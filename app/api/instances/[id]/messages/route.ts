@@ -43,23 +43,46 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
   try {
     // Fetch from chat_messages (the realtime table, not the cache)
+    // Use a higher limit to ensure we get all recent messages
     const { data, error } = await supabase
       .from("chat_messages")
       .select("*")
       .eq("instance_id", id)
       .order("created_at", { ascending: true })
-      .limit(100);
+      .limit(500);
 
     if (error) {
       console.error("[messages/GET] DB error:", error);
       return NextResponse.json(
-        { error: "Database error" },
+        { error: "Database error", details: error.message },
         { status: 500 },
       );
     }
 
     console.log(`[messages/GET] Returning ${data?.length ?? 0} messages for instance ${id}`);
-    return NextResponse.json({ messages: data ?? [] }, { status: 200 });
+    // Debug: Log first few messages to verify data structure
+    if (data && data.length > 0) {
+      const sample = data.slice(0, 3).map((m: any) => ({
+        id: m.id?.slice(0, 8),
+        role: m.role,
+        tool_name: m.tool_name,
+        content_preview: m.content?.slice(0, 100),
+        has_tool_fields: !!(m.tool_name || m.tool_id),
+      }));
+      console.log(`[messages/GET] Sample messages:`, JSON.stringify(sample));
+    }
+
+    // Return with cache-control headers to prevent stale data
+    return NextResponse.json(
+      { messages: data ?? [] },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+          "Pragma": "no-cache",
+        },
+      }
+    );
   } catch (err) {
     console.error("[messages/GET] Unexpected error:", err);
     return NextResponse.json(

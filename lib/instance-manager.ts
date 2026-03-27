@@ -265,8 +265,14 @@ export class InstanceManager extends EventEmitter {
     let turnText = "";
     let currentTextBlockStarted = false;
 
-    // Track current tool being built (input comes via deltas)
-    let currentTool: { id: string; name: string; inputJson: string } | null = null;
+    // Track current tool being built (input may come via deltas or be present in content_block_start)
+    let currentTool: {
+      id: string;
+      name: string;
+      inputJson: string;  // Accumulated from input_json_delta events
+      initialInput: Record<string, unknown> | null;  // Initial input from content_block_start
+      hasReceivedDeltas: boolean;
+    } | null = null;
 
     let errorOccurred = false;
     try {
@@ -441,13 +447,25 @@ export class InstanceManager extends EventEmitter {
               const toolName = streamEvent.content_block.name;
               const toolId = streamEvent.content_block.id;
 
-              // Start tracking this tool - input will come via deltas
-              currentTool = { id: toolId, name: toolName, inputJson: "" };
+              // Check if input is already present in the content_block (some tools send input immediately)
+              const initialInput = streamEvent.content_block.input;
+              const hasInitialInput = initialInput && typeof initialInput === "object" && Object.keys(initialInput).length > 0;
+
+              // Start tracking this tool - store initial input separately from delta accumulation
+              currentTool = {
+                id: toolId,
+                name: toolName,
+                inputJson: "",  // Will accumulate from input_json_delta events
+                initialInput: hasInitialInput ? initialInput : null,
+                hasReceivedDeltas: false
+              };
+
+              console.log(`[InstanceManager] Tool ${toolName} started, initial input: ${hasInitialInput ? JSON.stringify(initialInput).slice(0, 200) : 'none (will come via deltas)'}`);
 
               this.emit("tool_start", instanceId, {
                 toolCallId: toolId,
                 toolName,
-                toolInput: {},
+                toolInput: hasInitialInput ? initialInput : {},
               });
             } else if (streamEvent.content_block?.type === "text") {
               // Starting a new text block - create message NOW so it has correct timestamp
@@ -486,38 +504,57 @@ export class InstanceManager extends EventEmitter {
                 }
               }
             } else if (delta?.type === "input_json_delta" && currentTool) {
-              // Accumulate tool input JSON
+              // Accumulate tool input JSON from streaming deltas
               const partial = delta.partial_json ?? "";
-              currentTool.inputJson += partial;
-              console.log(`[InstanceManager] input_json_delta for ${currentTool.name}: +${partial.length} chars, total: ${currentTool.inputJson.length}`);
+              if (partial) {
+                // Simply accumulate deltas - these are the authoritative source when present
+                currentTool.inputJson += partial;
+                currentTool.hasReceivedDeltas = true;
+                console.log(`[InstanceManager] input_json_delta for ${currentTool.name}: +${partial.length} chars, total: ${currentTool.inputJson.length}`);
+              }
             }
           } else if (streamEvent?.type === "content_block_stop") {
             // Handle tool completion
             if (currentTool) {
-              console.log(`[InstanceManager] content_block_stop for tool ${currentTool.name}, inputJson length: ${currentTool.inputJson.length}`);
-              let toolInput = {};
-              try {
-                if (currentTool.inputJson) {
+              console.log(`[InstanceManager] content_block_stop for tool ${currentTool.name}, inputJson length: ${currentTool.inputJson.length}, hasReceivedDeltas: ${currentTool.hasReceivedDeltas}, hasInitialInput: ${!!currentTool.initialInput}`);
+              let toolInput: Record<string, unknown> = {};
+
+              // Prefer delta-accumulated JSON if deltas were received; otherwise use initial input
+              if (currentTool.hasReceivedDeltas && currentTool.inputJson.trim()) {
+                try {
                   toolInput = JSON.parse(currentTool.inputJson);
-                  console.log(`[InstanceManager] Parsed tool input:`, JSON.stringify(toolInput).slice(0, 200));
+                  console.log(`[InstanceManager] Parsed tool input from deltas for ${currentTool.name}:`, JSON.stringify(toolInput).slice(0, 300));
+                } catch (e) {
+                  // If JSON parsing fails, store as-is
+                  console.error(`[InstanceManager] Failed to parse tool JSON for ${currentTool.name}:`, e, currentTool.inputJson.slice(0, 200));
+                  toolInput = { _raw: currentTool.inputJson, _parseError: true };
                 }
-              } catch (e) {
-                // If JSON parsing fails, store as-is
-                console.error(`[InstanceManager] Failed to parse tool JSON:`, e, currentTool.inputJson.slice(0, 200));
-                toolInput = { raw: currentTool.inputJson };
+              } else if (currentTool.initialInput) {
+                // Use initial input from content_block_start
+                toolInput = currentTool.initialInput;
+                console.log(`[InstanceManager] Using initial input for ${currentTool.name}:`, JSON.stringify(toolInput).slice(0, 300));
+              } else {
+                console.log(`[InstanceManager] No input for tool ${currentTool.name}, using empty object`);
               }
 
-              await this.supabase
+              const contentToSave = JSON.stringify(toolInput);
+              console.log(`[InstanceManager] Saving tool ${currentTool.name} to DB, content: ${contentToSave.slice(0, 500)}`);
+
+              const { error: insertError } = await this.supabase
                 .from("chat_messages")
                 .insert({
                   instance_id: instanceId,
                   role: "assistant",
-                  content: JSON.stringify(toolInput),
+                  content: contentToSave,
                   tool_name: currentTool.name,
                   tool_id: currentTool.id,
                   is_error: false,
                   status: "done",
                 });
+
+              if (insertError) {
+                console.error(`[InstanceManager] Failed to save tool ${currentTool.name} to DB:`, insertError);
+              }
 
               currentTool = null;
             }

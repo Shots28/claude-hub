@@ -7,13 +7,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 import { PermissionBanner } from "./permission-banner";
-import { StatusBadge } from "./status-badge";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ErrorBanner } from "./error-banner";
 import { FileViewer } from "./file-viewer";
 import { PlanViewer } from "./plan-viewer";
 import { FileActivity } from "./file-activity";
-import { useBridgeStatus, type BridgeHealth } from "@/lib/use-bridge-status";
+import { useBridgeStatus } from "@/lib/use-bridge-status";
 import { useFileActivity } from "@/lib/use-file-activity";
 import type {
   DbInstance,
@@ -23,26 +22,29 @@ import type {
   UiMessage,
 } from "@/lib/types";
 
-const PERMISSION_MODES: { value: PermissionMode; label: string; short: string; color: string }[] = [
-  { value: "bypassPermissions", label: "Bypass all permissions", short: "Bypass", color: "text-red-500" },
-  { value: "acceptEdits", label: "Auto-accept edits", short: "Auto-edit", color: "text-orange-500" },
-  { value: "plan", label: "Plan mode", short: "Plan", color: "text-blue-500" },
-  { value: "default", label: "Ask for approval", short: "Ask", color: "text-hub-text-muted" },
+// Permission modes config
+const PERMISSION_MODES: { value: PermissionMode; short: string; color: string; borderColor: string }[] = [
+  { value: "bypassPermissions", short: "Bypass", color: "bg-red-500/15 text-red-400 border-red-500/30", borderColor: "border-red-500/50" },
+  { value: "acceptEdits", short: "Auto-edit", color: "bg-orange-500/15 text-orange-400 border-orange-500/30", borderColor: "border-orange-500/50" },
+  { value: "plan", short: "Plan", color: "bg-blue-500/15 text-blue-400 border-blue-500/30", borderColor: "border-blue-500/50" },
+  { value: "default", short: "Ask", color: "bg-neutral-500/15 text-neutral-400 border-neutral-500/30", borderColor: "border-hub-border" },
 ];
 
-// Get mode color class
-function getModeColor(mode: PermissionMode): string {
-  return PERMISSION_MODES.find(m => m.value === mode)?.color || "text-hub-text-muted";
+// Effort levels config
+const EFFORT_LEVELS: { value: string; short: string; tokens: number }[] = [
+  { value: "low", short: "Quick", tokens: 1024 },
+  { value: "medium", short: "Normal", tokens: 8192 },
+  { value: "high", short: "Deep", tokens: 32768 },
+];
+
+function getModeConfig(mode: PermissionMode) {
+  return PERMISSION_MODES.find(m => m.value === mode) || PERMISSION_MODES[3];
 }
 
-// Get mode border color for input
-function getModeBorderColor(mode: PermissionMode): string {
-  switch (mode) {
-    case "bypassPermissions": return "border-red-500/50 focus:ring-red-500/50 focus:border-red-500/50";
-    case "acceptEdits": return "border-orange-500/50 focus:ring-orange-500/50 focus:border-orange-500/50";
-    case "plan": return "border-blue-500/50 focus:ring-blue-500/50 focus:border-blue-500/50";
-    default: return "border-hub-border focus:ring-hub-accent/50 focus:border-hub-accent/50";
-  }
+function getEffortFromTokens(tokens: number): string {
+  if (tokens <= 2048) return "low";
+  if (tokens <= 16384) return "medium";
+  return "high";
 }
 
 interface ChatViewProps {
@@ -61,25 +63,11 @@ interface ChatViewProps {
 
 function MessageSkeleton({ align }: { align: "left" | "right" }) {
   return (
-    <div
-      className={`flex ${align === "right" ? "justify-end" : "justify-start"} px-4`}
-    >
-      <div
-        className={`rounded-2xl px-4 py-3 max-w-[75%] ${
-          align === "right"
-            ? "bg-hub-accent/20"
-            : "bg-hub-surface-2"
-        }`}
-      >
+    <div className={`flex ${align === "right" ? "justify-end" : "justify-start"} px-4`}>
+      <div className={`rounded-2xl px-4 py-3 max-w-[75%] ${align === "right" ? "bg-hub-accent/20" : "bg-hub-surface-2"}`}>
         <div className="space-y-2 animate-pulse">
-          <div
-            className="h-3 rounded bg-hub-text-muted/20"
-            style={{ width: align === "right" ? "120px" : "180px" }}
-          />
-          <div
-            className="h-3 rounded bg-hub-text-muted/20"
-            style={{ width: align === "right" ? "80px" : "140px" }}
-          />
+          <div className="h-3 rounded bg-hub-text-muted/20" style={{ width: align === "right" ? "120px" : "180px" }} />
+          <div className="h-3 rounded bg-hub-text-muted/20" style={{ width: align === "right" ? "80px" : "140px" }} />
         </div>
       </div>
     </div>
@@ -113,6 +101,7 @@ export function ChatView({
   const [loading, setLoading] = useState(true);
   const [clearingSession, setClearingSession] = useState(false);
   const [updatingMode, setUpdatingMode] = useState(false);
+  const [updatingEffort, setUpdatingEffort] = useState(false);
   const bridgeStatus = useBridgeStatus();
 
   // File viewer / plan viewer / file activity state
@@ -128,15 +117,10 @@ export function ChatView({
 
   // Filter messages for this instance
   const instanceMessages = useMemo(
-    () =>
-      messages
-        .filter((m) => m.instance_id === instance.id)
-        .sort(
-          (a, b) =>
-            new Date(a.created_at).getTime() -
-            new Date(b.created_at).getTime(),
-        ),
-    [messages, instance.id],
+    () => messages
+      .filter((m) => m.instance_id === instance.id)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [messages, instance.id]
   );
 
   // Extract file activity from messages
@@ -144,50 +128,37 @@ export function ChatView({
 
   // Filter permissions for this instance
   const instancePermissions = useMemo(
-    () =>
-      pendingPermissions.filter(
-        (p) => p.instance_id === instance.id && p.status === "pending",
-      ),
-    [pendingPermissions, instance.id],
+    () => pendingPermissions.filter((p) => p.instance_id === instance.id && p.status === "pending"),
+    [pendingPermissions, instance.id]
   );
 
-  // Detect streaming: find assistant message with status === "streaming"
+  // Detect streaming
   useEffect(() => {
-    const streamingMsg = instanceMessages.find(
-      (m) => m.role === "assistant" && m.status === "streaming"
-    );
+    const streamingMsg = instanceMessages.find((m) => m.role === "assistant" && m.status === "streaming");
     setStreamingId(streamingMsg?.id ?? null);
   }, [instanceMessages]);
 
-  const handleSend = useCallback(
-    async (text: string) => {
-      await onSendMessage(instance.id, text);
-    },
-    [instance.id, onSendMessage],
-  );
+  const handleSend = useCallback(async (text: string) => {
+    await onSendMessage(instance.id, text);
+  }, [instance.id, onSendMessage]);
 
   const handleInterrupt = useCallback(() => {
     onInterrupt(instance.id);
   }, [instance.id, onInterrupt]);
 
-  // Local optimistic mode state for immediate UI feedback
+  // Mode state
   const [optimisticMode, setOptimisticMode] = useState<PermissionMode | null>(null);
   const currentMode: PermissionMode = optimisticMode ?? (instance.permission_mode as PermissionMode);
 
-  // Sync optimistic state when real instance updates
   useEffect(() => {
     setOptimisticMode(null);
   }, [instance.permission_mode]);
 
-  // Cycle to next permission mode on tap
   const handleModeCycle = useCallback(async () => {
     if (updatingMode) return;
-
     const currentIndex = PERMISSION_MODES.findIndex(m => m.value === currentMode);
     const nextIndex = (currentIndex + 1) % PERMISSION_MODES.length;
     const nextMode = PERMISSION_MODES[nextIndex].value;
-
-    // Optimistic update - show immediately
     setOptimisticMode(nextMode);
     setUpdatingMode(true);
     try {
@@ -197,18 +168,41 @@ export function ChatView({
         body: JSON.stringify({ permissionMode: nextMode }),
       });
     } catch {
-      // Revert on failure
       setOptimisticMode(null);
     } finally {
       setUpdatingMode(false);
     }
   }, [instance.id, currentMode, updatingMode]);
 
-  // New Chat: clears the session_id so the next message starts a fresh Claude
-  // conversation. Previous messages remain visible (no visual separator needed —
-  // the user explicitly clicked "New Chat"). A system-message separator is not
-  // inserted because the messages API only creates role="user" rows; a client-side
-  // divider could be added in the future if desired.
+  // Effort state
+  const [optimisticEffort, setOptimisticEffort] = useState<string | null>(null);
+  const currentEffort = optimisticEffort ?? getEffortFromTokens(instance.max_thinking_tokens || 8192);
+
+  useEffect(() => {
+    setOptimisticEffort(null);
+  }, [instance.max_thinking_tokens]);
+
+  const handleEffortCycle = useCallback(async () => {
+    if (updatingEffort) return;
+    const currentIndex = EFFORT_LEVELS.findIndex(e => e.value === currentEffort);
+    const nextIndex = (currentIndex + 1) % EFFORT_LEVELS.length;
+    const nextEffort = EFFORT_LEVELS[nextIndex];
+    setOptimisticEffort(nextEffort.value);
+    setUpdatingEffort(true);
+    try {
+      await fetch(`/api/instances/${instance.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_thinking_tokens: nextEffort.tokens }),
+      });
+    } catch {
+      setOptimisticEffort(null);
+    } finally {
+      setUpdatingEffort(false);
+    }
+  }, [instance.id, currentEffort, updatingEffort]);
+
+  // New Chat handler
   const handleNewChat = useCallback(async () => {
     if (clearingSession) return;
     setClearingSession(true);
@@ -218,7 +212,6 @@ export function ChatView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ current_session_id: null }),
       });
-      // Reload messages to reflect the cleared session
       await onLoadMessages(instance.id);
     } catch {
       // silently fail
@@ -227,124 +220,103 @@ export function ChatView({
     }
   }, [instance.id, onLoadMessages, clearingSession]);
 
+  const modeConfig = getModeConfig(currentMode);
+  const effortConfig = EFFORT_LEVELS.find(e => e.value === currentEffort) || EFFORT_LEVELS[1];
+  const isRunning = instance.status === "running";
+  const isQueued = instance.status === "queued";
+  const isBusy = isRunning || isQueued;
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex-shrink-0 border-b border-hub-border bg-hub-bg/80 backdrop-blur-sm px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm font-semibold truncate">
-                {instance.name}
-              </h1>
-              <StatusBadge
-                status={instance.status as InstanceStatus}
-                showLabel
-                errorMessage={instance.error_message || undefined}
-                hasPermission={instancePermissions.length > 0}
-                lastActivityAt={instance.last_activity_at || undefined}
-              />
-              {/* Bridge health dot */}
-              <span
-                className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  bridgeStatus.health === "connected"
-                    ? "bg-emerald-400"
-                    : bridgeStatus.health === "slow"
-                      ? "bg-yellow-400"
-                      : bridgeStatus.health === "offline"
-                        ? "bg-red-400"
-                        : "bg-hub-text-muted/30"
-                }`}
-                title={`Bridge: ${bridgeStatus.health}`}
-              />
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-xs text-hub-text-muted truncate">
-                {instance.repo_path}
-              </p>
-              <span className="text-hub-text-muted/30">|</span>
-              <span className="text-xs text-hub-text-muted">
-                {instance.model || "sonnet"}
-              </span>
-              <span className="text-hub-text-muted/30">|</span>
-              {/* Mode switcher - tap to cycle */}
-              <button
-                type="button"
-                onClick={handleModeCycle}
-                disabled={updatingMode}
-                className={`text-xs font-medium disabled:opacity-50 transition-colors ${getModeColor(currentMode)}`}
-                title="Tap to cycle mode"
-              >
-                {updatingMode ? "..." : PERMISSION_MODES.find(m => m.value === currentMode)?.short || "Mode"}
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {/* File activity button */}
-            {fileActivity.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowFileActivity(true)}
-                className="relative h-8 flex items-center justify-center px-2 rounded-lg hover:bg-hub-surface-2 text-hub-text-muted hover:text-hub-text transition-colors focus:outline-none"
-                aria-label={`${fileActivity.length} files touched`}
-                title={`${fileActivity.length} files touched`}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
-                  />
-                </svg>
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-hub-accent text-[9px] font-bold text-white px-1">
-                  {fileActivity.length}
+      {/* Header - Clean and minimal */}
+      <div className="flex-shrink-0 border-b border-hub-border bg-hub-bg/80 backdrop-blur-sm px-4 py-2.5">
+        <div className="max-w-3xl mx-auto">
+          {/* Top row: Name + New Chat */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="text-sm font-semibold truncate">{instance.name}</h1>
+              {/* Simple status indicator */}
+              {isBusy && (
+                <span className="flex items-center gap-1.5 text-xs text-blue-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  {isQueued ? "Queued" : "Working"}
                 </span>
-              </button>
-            )}
+              )}
+              {instancePermissions.length > 0 && (
+                <span className="flex items-center gap-1.5 text-xs text-orange-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                  Waiting
+                </span>
+              )}
+              {instance.status === "error" && (
+                <span className="text-xs text-red-400">Error</span>
+              )}
+              {/* Bridge indicator - very subtle */}
+              {bridgeStatus.health === "offline" && (
+                <span className="text-[10px] text-yellow-500">Offline</span>
+              )}
+            </div>
 
-            {/* New Chat button */}
+            {/* New Chat button - clear and tappable */}
             <button
               type="button"
               onClick={handleNewChat}
               disabled={clearingSession}
-              className="h-8 flex items-center justify-center px-2 rounded-lg hover:bg-hub-surface-2 text-hub-text-muted hover:text-hub-text disabled:opacity-50 transition-colors focus:outline-none"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-hub-surface-2 hover:bg-hub-border active:bg-hub-border text-hub-text-muted hover:text-hub-text disabled:opacity-50 transition-all text-xs font-medium"
               aria-label="New chat"
-              title="New chat"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              <span className="text-[10px] ml-1">New</span>
+              New
             </button>
+          </div>
+
+          {/* Bottom row: Tappable pills for Mode, Effort, Files */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Mode pill - clearly tappable */}
+            <button
+              type="button"
+              onClick={handleModeCycle}
+              disabled={updatingMode}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all active:scale-95 disabled:opacity-50 ${modeConfig.color}`}
+              title="Tap to change permission mode"
+            >
+              {updatingMode ? "..." : modeConfig.short}
+            </button>
+
+            {/* Effort pill - clearly tappable */}
+            <button
+              type="button"
+              onClick={handleEffortCycle}
+              disabled={updatingEffort}
+              className="px-2.5 py-1 rounded-full text-xs font-medium border bg-purple-500/15 text-purple-400 border-purple-500/30 transition-all active:scale-95 disabled:opacity-50"
+              title="Tap to change thinking effort"
+            >
+              {updatingEffort ? "..." : effortConfig.short}
+            </button>
+
+            {/* Model indicator (non-interactive) */}
+            <span className="px-2.5 py-1 rounded-full text-xs text-hub-text-muted/60 bg-hub-surface-2">
+              {instance.model || "sonnet"}
+            </span>
+
+            {/* File activity - if any */}
+            {fileActivity.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowFileActivity(true)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-hub-surface-2 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                </svg>
+                {fileActivity.length}
+              </button>
+            )}
           </div>
         </div>
       </div>
-
-      {/* Bridge offline warning */}
-      {bridgeStatus.health === "offline" && (
-        <div className="flex-shrink-0 bg-yellow-500/10 border-b border-yellow-500/20 px-4 py-2">
-          <p className="text-xs text-yellow-400 text-center">
-            Bridge appears offline — your message will be queued
-          </p>
-        </div>
-      )}
 
       {/* Connection error banner */}
       <ErrorBanner message={connectionError} onDismiss={onClearError} />
@@ -383,7 +355,7 @@ export function ChatView({
         onSend={handleSend}
         onInterrupt={handleInterrupt}
         instanceStatus={instance.status as InstanceStatus}
-        modeBorderClass={getModeBorderColor(currentMode)}
+        modeBorderClass={modeConfig.borderColor}
       />
 
       {/* File viewer modal */}
@@ -395,7 +367,7 @@ export function ChatView({
         />
       )}
 
-      {/* Plan viewer modal (with auto-refresh) */}
+      {/* Plan viewer modal */}
       {viewingPlan && (
         <PlanViewer
           instanceId={instance.id}

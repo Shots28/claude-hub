@@ -1,6 +1,6 @@
 "use client";
 // ---------------------------------------------------------------------------
-// ChatInput — Text input with send/interrupt/voice toggle
+// ChatInput — Clean input with contextual action buttons
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,7 +19,7 @@ export function ChatInput({
   onInterrupt,
   instanceStatus,
   disabled = false,
-  modeBorderClass = "border-hub-border focus:ring-hub-accent/50 focus:border-hub-accent/50",
+  modeBorderClass = "border-hub-border focus-within:border-hub-accent/50",
 }: ChatInputProps) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
@@ -31,15 +31,14 @@ export function ChatInput({
   const isRunning = instanceStatus === "running";
   const isQueued = instanceStatus === "queued";
   const isBusy = isRunning || isQueued;
-  // Allow sending messages even when busy - they will be queued
-  const canSend = text.trim().length > 0;
+  const hasText = text.trim().length > 0;
 
   // Auto-resize textarea
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, []);
 
   useEffect(() => {
@@ -54,33 +53,22 @@ export function ChatInput({
     const trimmed = text.trim().replace(/\0/g, "");
     if (!trimmed || trimmed.length > 50000) return;
 
-    // Clear input immediately for responsiveness
     setText("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    // Delivery status is now shown on the message bubble itself (pending/delivered/failed)
-    // No misleading "Sent" status here — the bubble's delivery indicator is the source of truth
     try {
       await onSend(trimmed);
     } catch {
-      // Error handling is in use-realtime.ts — message bubble shows "failed" state
+      // Error handling is in use-realtime.ts
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter") {
-      // Only send on Cmd/Ctrl+Enter (mobile-friendly: just use send button)
-      if (e.metaKey || e.ctrlKey) {
-        e.preventDefault();
-        handleSend();
-      }
-      // Plain Enter and Shift+Enter both add new lines (default behavior)
-      // No preventDefault needed - textarea handles it naturally
-    } else if (e.key === "Escape" && isRunning) {
-      // Escape to interrupt when running
-      onInterrupt();
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
@@ -100,11 +88,9 @@ export function ChatInput({
       };
 
       mediaRecorder.onstop = async () => {
-        // Stop all tracks
         stream.getTracks().forEach((t) => t.stop());
-
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        if (blob.size < 100) return; // Too short
+        if (blob.size < 100) return;
 
         setTranscribing(true);
         try {
@@ -155,42 +141,11 @@ export function ChatInput({
   };
 
   return (
-    <div className="border-t border-hub-border bg-hub-bg px-3 py-3 safe-area-bottom">
-      <div className="flex items-end gap-2 max-w-3xl mx-auto">
-        {/* Voice button */}
-        <button
-          type="button"
-          onClick={toggleRecording}
-          disabled={disabled || transcribing}
-          className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl transition-colors focus:outline-none ${
-            recording
-              ? "bg-red-600 text-white animate-pulse"
-              : transcribing
-                ? "bg-hub-surface-2 text-hub-text-muted opacity-50"
-                : "bg-hub-surface-2 text-hub-text-muted hover:text-hub-text hover:bg-hub-border"
-          }`}
-          aria-label={recording ? "Stop recording" : "Voice input"}
-        >
-          {transcribing ? (
-            <div className="w-4 h-4 border-2 border-hub-text-muted/30 border-t-hub-accent rounded-full animate-spin" />
-          ) : (
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
-              />
-            </svg>
-          )}
-        </button>
-
-        <div className="flex-1 relative">
+    <div className="border-t border-hub-border bg-hub-bg px-3 py-2.5 safe-area-bottom">
+      <div className="max-w-3xl mx-auto">
+        {/* Input container with integrated buttons */}
+        <div className={`flex items-end gap-2 bg-hub-surface-2 rounded-2xl border transition-colors ${modeBorderClass}`}>
+          {/* Text input */}
           <textarea
             ref={textareaRef}
             value={text}
@@ -200,51 +155,88 @@ export function ChatInput({
               transcribing
                 ? "Transcribing..."
                 : recording
-                  ? "Recording... tap mic to stop"
+                  ? "Recording..."
                   : isBusy
-                    ? "Type to queue another message..."
-                    : "Message Claude..."
+                    ? "Queue a message..."
+                    : "Message..."
             }
             disabled={disabled}
             rows={1}
-            className={`w-full bg-hub-surface-2 border rounded-xl px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none focus:ring-2 disabled:opacity-50 transition-colors ${modeBorderClass}`}
+            className="flex-1 bg-transparent px-4 py-2.5 text-sm text-hub-text placeholder-hub-text-muted/50 resize-none focus:outline-none disabled:opacity-50 min-h-[42px]"
           />
+
+          {/* Action buttons container */}
+          <div className="flex items-center gap-1 pr-2 pb-1.5">
+            {/* Stop button - only when busy */}
+            {isBusy && (
+              <button
+                type="button"
+                onClick={onInterrupt}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-red-500 hover:bg-red-600 active:bg-red-700 transition-colors"
+                aria-label="Stop"
+              >
+                <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                </svg>
+              </button>
+            )}
+
+            {/* Mic button - when not busy and no text */}
+            {!isBusy && !hasText && (
+              <button
+                type="button"
+                onClick={toggleRecording}
+                disabled={disabled || transcribing}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${
+                  recording
+                    ? "bg-red-500 text-white animate-pulse"
+                    : transcribing
+                      ? "bg-hub-border text-hub-text-muted opacity-50"
+                      : "bg-hub-border text-hub-text-muted hover:text-hub-text hover:bg-hub-text-muted/20"
+                }`}
+                aria-label={recording ? "Stop recording" : "Voice input"}
+              >
+                {transcribing ? (
+                  <div className="w-3.5 h-3.5 border-2 border-hub-text-muted/30 border-t-hub-text-muted rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                  </svg>
+                )}
+              </button>
+            )}
+
+            {/* Send button - always visible when there's text */}
+            {(hasText || isBusy) && (
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!hasText}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors ${
+                  hasText
+                    ? "bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 text-white"
+                    : "bg-hub-border text-hub-text-muted/30"
+                }`}
+                aria-label={isBusy ? "Queue message" : "Send"}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Interrupt button - shown when running */}
-        {isBusy && (
-          <button
-            type="button"
-            onClick={onInterrupt}
-            className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-700 active:bg-red-800 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500/50"
-            aria-label="Interrupt"
-          >
-            <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <rect x="6" y="6" width="12" height="12" rx="2" />
-            </svg>
-          </button>
+        {/* Recording indicator */}
+        {recording && (
+          <div className="mt-1.5 px-2">
+            <span className="text-[11px] text-red-400 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+              Recording... tap mic to stop
+            </span>
+          </div>
         )}
-
-        {/* Send button - always available */}
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={!canSend}
-          className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-hub-accent hover:bg-hub-accent-hover active:bg-blue-700 disabled:bg-hub-surface-2 disabled:text-hub-text-muted/30 transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50"
-          aria-label={isBusy ? "Queue message" : "Send"}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-          </svg>
-        </button>
       </div>
-
-      {/* Status indicators */}
-      {recording && (
-        <div className="max-w-3xl mx-auto mt-1.5 px-1">
-          <span className="text-[11px] text-red-400">Recording...</span>
-        </div>
-      )}
     </div>
   );
 }

@@ -485,20 +485,25 @@ export class InstanceManager extends EventEmitter {
                     .eq("id", currentMsgId);
                 }
               }
-            } else if (delta?.type === "input_json_delta" && delta.partial_json && currentTool) {
+            } else if (delta?.type === "input_json_delta" && currentTool) {
               // Accumulate tool input JSON
-              currentTool.inputJson += delta.partial_json;
+              const partial = delta.partial_json ?? "";
+              currentTool.inputJson += partial;
+              console.log(`[InstanceManager] input_json_delta for ${currentTool.name}: +${partial.length} chars, total: ${currentTool.inputJson.length}`);
             }
           } else if (streamEvent?.type === "content_block_stop") {
             // Handle tool completion
             if (currentTool) {
+              console.log(`[InstanceManager] content_block_stop for tool ${currentTool.name}, inputJson length: ${currentTool.inputJson.length}`);
               let toolInput = {};
               try {
                 if (currentTool.inputJson) {
                   toolInput = JSON.parse(currentTool.inputJson);
+                  console.log(`[InstanceManager] Parsed tool input:`, JSON.stringify(toolInput).slice(0, 200));
                 }
-              } catch {
+              } catch (e) {
                 // If JSON parsing fails, store as-is
+                console.error(`[InstanceManager] Failed to parse tool JSON:`, e, currentTool.inputJson.slice(0, 200));
                 toolInput = { raw: currentTool.inputJson };
               }
 

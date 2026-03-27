@@ -291,7 +291,7 @@ export function ChatView({
   const isBusy = isRunning || isQueued;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden">
       {/* Header - Clean and minimal */}
       <div className="flex-shrink-0 border-b border-hub-border bg-hub-bg/80 backdrop-blur-sm px-4 py-2.5">
         <div className="max-w-3xl mx-auto">

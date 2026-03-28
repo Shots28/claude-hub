@@ -235,6 +235,62 @@ When Claude asks the user a question via `AskUserQuestion`, the UI displays:
 
 These interactive elements appear inline with the tool call activity item and auto-hide after the user responds.
 
+## Troubleshooting
+
+### Messages Not Persisting (COMMON ISSUE)
+
+**Symptoms**: Messages appear when sent but disappear after page refresh.
+
+**Diagnostic endpoint**: `GET /api/health/db` — Returns database connection status and recent messages.
+
+**Root causes and fixes**:
+
+1. **Database migrations not run**
+   - The `chat_messages` table may not exist or have wrong schema
+   - Run migrations: Go to Supabase Dashboard → SQL Editor → Run contents of `supabase/migrations/*.sql` in order
+   - Required tables: `instances`, `chat_messages`, `permission_requests`
+
+2. **Environment variables not set on Vercel**
+   - Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+   - Check: Vercel Dashboard → Project → Settings → Environment Variables
+   - The `SUPABASE_SERVICE_ROLE_KEY` is required for server-side API routes
+
+3. **Wrong Supabase project**
+   - Local `.env.local` may point to different project than Vercel env vars
+   - Verify URL matches: Check `/api/health/db` response shows correct `supabaseUrl`
+
+4. **Foreign key constraint**
+   - Messages require valid `instance_id` referencing `instances` table
+   - If instance was deleted, its messages are cascade-deleted
+
+**Message flow**:
+```
+User sends message:
+  → Frontend: use-realtime.ts sendMessage()
+  → POST /api/instances/[id]/messages
+  → Supabase: INSERT into chat_messages
+  → Response: { message: {...}, queued: bool }
+
+Page refresh:
+  → ChatView mounts, calls loadMessages()
+  → GET /api/instances/[id]/messages
+  → Supabase: SELECT from chat_messages WHERE instance_id = ?
+  → Response: { messages: [...], _debug: {...} }
+```
+
+**Debug logs to check** (Vercel Dashboard → Logs):
+- `[messages/POST] User message inserted successfully, id: xxx` — INSERT worked
+- `[messages/GET] Returning X messages (total count: Y)` — SELECT worked
+- If POST succeeds but GET returns 0, check if instance_id matches
+
+### Bridge Not Processing Messages
+
+**Symptoms**: Messages send but Claude never responds, instance stays "queued".
+
+**Cause**: The bridge (`server.ts`) is not running. On Vercel, only the Next.js app runs — the bridge must run separately on a server with the Claude CLI installed.
+
+**Fix**: Run `npm run bridge` on a machine with Claude CLI access.
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)

@@ -143,9 +143,15 @@ export function ChatView({
 
   // Filter messages for this instance
   const instanceMessages = useMemo(
-    () => messages
-      .filter((m) => m.instance_id === instance.id)
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    () => {
+      const filtered = messages.filter((m) => m.instance_id === instance.id);
+      console.log(`[ChatView] Filtering messages: total=${messages.length}, forInstance=${filtered.length}, instanceId=${instance.id}`);
+      if (messages.length > 0 && filtered.length === 0) {
+        // Debug: log sample message to see why filter fails
+        console.log("[ChatView] Sample message instance_ids:", messages.slice(0, 3).map(m => m.instance_id));
+      }
+      return filtered.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    },
     [messages, instance.id]
   );
 

@@ -328,6 +328,21 @@ If polling runs before the API response replaces the optimistic message, it adds
 
 **Fix**: The polling merge logic now checks for optimistic messages with matching content before adding a new entry (commit 2b69e94).
 
+### Duplicate Messages from Session Sync
+
+**Symptoms**: User sends one message from phone, it appears twice with two duplicate responses. Can cascade into a loop.
+
+**Root cause**: Session sync re-imports messages the bridge just processed:
+1. Phone sends "yup" → bridge processes via SDK → SDK writes to JSONL
+2. `sessionMessageCounts` is NOT updated → session sync (10s later) sees new JSONL entries
+3. Session sync inserts "yup" again into `chat_messages` → Realtime fires → bridge processes again
+4. Secondary issue: `initSessionSyncCounts` counted DB rows (includes tool messages) but compared against JSONL text messages — mismatch caused false re-imports at startup
+
+**Fix** (commit 4587394):
+1. `initSessionSyncCounts` reads actual JSONL files instead of DB row count
+2. `sessionMessageCounts` updated after every `sendMessage()` call
+3. Session sync inserts wrapped in `instanceLocks` to prevent Realtime race
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)
@@ -546,6 +561,18 @@ Claude Hub can sync with Claude Code IDE (VS Code, CLI) sessions:
 - Session files must exist on the machine running the bridge
 - Switching sessions replaces the current chat history in Supabase
 - Tool outputs (file contents, command results) are not imported
+
+**Deduplication (critical for preventing double messages):**
+
+The live session sync polls JSONL files every 10 seconds and inserts new messages into `chat_messages`. Without proper deduplication, messages sent from the phone get duplicated:
+1. Phone sends message → bridge processes via SDK → SDK writes to JSONL
+2. Session sync sees new JSONL entries → re-imports them → duplicate messages
+3. Realtime fires for the duplicates → bridge processes again → duplicate responses
+
+Three mechanisms prevent this:
+- **`sessionMessageCounts`** — Tracks the JSONL text message count per instance. Updated after every `sendMessage()` call and initialized by reading actual JSONL files (not DB rows, which include tool messages and diverge from JSONL counts).
+- **`instanceLocks`** — Session sync acquires the instance lock before inserting, preventing the Realtime handler from racing (the INSERT triggers a Realtime event that could arrive before `processedMessageIds` is updated).
+- **`processedMessageIds`** — All inserted user message IDs are added to this set so the Realtime handler skips them.
 
 ### Debug Endpoints
 

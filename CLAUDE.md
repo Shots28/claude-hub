@@ -419,6 +419,13 @@ sleep 8 && tail -20 /tmp/claude-hub-bridge.log
    - Two bridges running cause race conditions and message drops
    - Always kill all existing processes before starting new bridge
 
+6. **Messages API returns oldest instead of newest (limit overflow)**
+   - Root cause: `GET /api/instances/[id]/messages` ordered ASC with `.limit(500)` — returns the oldest 500, silently drops the newest when count > 500
+   - Symptom: User sends messages, Claude responds, but on page refresh the latest messages are gone (old messages still show)
+   - Trigger: Instance exceeds 500 total `chat_messages` rows (common after extended conversations with tool calls)
+   - Fix: Order DESC with `.limit(500)` then reverse the result for chronological display
+   - **CRITICAL**: Any query on `chat_messages` with a limit MUST order DESC first to get recent messages
+
 ### UI Issues and Fixes (2024-03-29)
 
 1. **3-dots menu invisible on desktop**

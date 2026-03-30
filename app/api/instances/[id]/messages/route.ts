@@ -44,14 +44,18 @@ export async function GET(req: NextRequest, context: RouteContext) {
   try {
     console.log("[messages/GET] Fetching messages for instance:", id);
 
-    // Fetch from chat_messages (the realtime table, not the cache)
-    // Use a higher limit to ensure we get all recent messages
-    const { data, error, count } = await supabase
+    // Fetch the LATEST messages by ordering DESC, then reverse for chronological display.
+    // Previously ordered ASC with limit(500) which returned the oldest messages and
+    // silently dropped recent ones once the instance exceeded 500 messages.
+    const { data: rawData, error, count } = await supabase
       .from("chat_messages")
       .select("*", { count: "exact" })
       .eq("instance_id", id)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(500);
+
+    // Reverse to chronological order (oldest first) for the client
+    const data = rawData ? [...rawData].reverse() : rawData;
 
     if (error) {
       console.error("[messages/GET] DB error:", error);

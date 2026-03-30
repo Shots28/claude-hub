@@ -54,8 +54,8 @@ function ChatsPageContent() {
     }
   }, [searchParams, realtime.instances, selectedId]);
 
-  // Track instances needing attention
-  const { totalAttention, hasAttention, needsAttention, markSeen } = useNeedsAttention(
+  // Track instances needing attention (permissions only)
+  const { hasAttention } = useNeedsAttention(
     realtime.instances,
     realtime.pendingPermissions,
     selectedId || undefined
@@ -95,9 +95,8 @@ function ChatsPageContent() {
   // Desktop: select in sidebar
   const handleSelectInstance = useCallback((id: string) => {
     setSelectedId(id);
-    if (hasAttention(id)) markSeen(id);
     router.push(`/chats?id=${id}`, { scroll: false });
-  }, [router, hasAttention, markSeen]);
+  }, [router]);
 
   const handleRefresh = useCallback(() => {
     realtime.refreshInstances();
@@ -220,7 +219,6 @@ function ChatsPageContent() {
                     <div className="flex items-center rounded-xl bg-hub-surface-2 overflow-hidden">
                       <Link
                         href={`/instances/${inst.id}`}
-                        onClick={() => { if (hasAttention(inst.id)) markSeen(inst.id); }}
                         className="flex-1 flex items-center gap-3 px-4 py-4 hover:bg-hub-border active:bg-hub-border transition-colors"
                       >
                         <StatusBadge status={inst.status as InstanceStatus} size="md" />
@@ -267,13 +265,7 @@ function ChatsPageContent() {
                           </div>
                         </div>
                         {needsAtt && (
-                          <span className={`h-5 flex items-center justify-center rounded-full text-[10px] font-medium text-white px-2 flex-shrink-0 ${
-                            needsAttention[inst.id] === "permission"
-                              ? "bg-orange-500"
-                              : "bg-emerald-500"
-                          }`}>
-                            {needsAttention[inst.id] === "permission" ? "Approval" : "Done"}
-                          </span>
+                          <span className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0 animate-pulse" />
                         )}
                       </Link>
 
@@ -334,11 +326,7 @@ function ChatsPageContent() {
                       {inst.name}
                     </span>
                     {needsAtt && (
-                      <span className={`h-[18px] flex items-center justify-center rounded-full text-[9px] font-medium text-white px-1.5 ${
-                        needsAttention[inst.id] === "permission" ? "bg-orange-500" : "bg-emerald-500"
-                      }`}>
-                        {needsAttention[inst.id] === "permission" ? "Approval" : "Done"}
-                      </span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0 animate-pulse" />
                     )}
                   </div>
                   {inst.last_message_preview && (

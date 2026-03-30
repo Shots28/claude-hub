@@ -6,7 +6,7 @@
 // Force dynamic rendering to avoid SSR context issues
 export const dynamic = "force-dynamic";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { InstanceSidebar } from "@/components/hub/instance-sidebar";
@@ -28,12 +28,22 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
     ? pathname.split("/")[2]
     : undefined;
 
-  // Track instances needing attention (completed or permission pending)
-  const { totalAttention } = useNeedsAttention(
+  // Track instances needing attention (permission requests only)
+  const { totalAttention, markAllSeen } = useNeedsAttention(
     realtime.instances,
     realtime.pendingPermissions,
     activeInstanceId
   );
+
+  // Auto-clear badge when user navigates to /chats
+  const isOnChats = pathname?.startsWith("/chats");
+  const prevOnChatsRef = useRef(false);
+  useEffect(() => {
+    if (isOnChats && !prevOnChatsRef.current && totalAttention > 0) {
+      markAllSeen();
+    }
+    prevOnChatsRef.current = !!isOnChats;
+  }, [isOnChats, totalAttention, markAllSeen]);
 
   // Determine active bottom nav tab
   const activeTab = pathname?.startsWith("/settings")

@@ -1025,40 +1025,10 @@ async function initBridge(
           instanceLocks.delete(instanceId);
         }
 
-        // After completion, re-check for newer unprocessed user messages
-        try {
-          const { data: latest } = await bridgeSupabase
-            .from("chat_messages")
-            .select("id, role, content")
-            .eq("instance_id", instanceId)
-            .order("created_at", { ascending: false })
-            .limit(1);
-
-          if (latest?.[0]?.role === "user" && !manager.isRunning(instanceId)) {
-            // Skip if we already processed this specific message
-            if (latest[0].id && processedMessageIds.has(latest[0].id)) {
-              console.log(`[bridge] Re-check: message ${latest[0].id} already processed, skipping`);
-            } else {
-              if (latest[0].id) processedMessageIds.set(latest[0].id, Date.now());
-              console.log(`[bridge] Re-processing pending message ${latest[0].id} for instance ${instanceId}`);
-              manager.sendMessage(instanceId, latest[0].content)
-                .then(async () => {
-                  try {
-                    const inst = await manager.getInstance(instanceId);
-                    if (inst?.current_session_id) {
-                      const jsonlCount = await countJsonlMessages(inst.repo_path, inst.current_session_id);
-                      sessionMessageCounts.set(instanceId, jsonlCount);
-                    }
-                  } catch { /* best effort */ }
-                })
-                .catch((err: any) => {
-                  console.error(`[bridge] Re-process failed for ${instanceId}:`, err);
-                });
-            }
-          }
-        } catch (err) {
-          console.error(`[bridge] Re-check failed for ${instanceId}:`, err);
-        }
+        // No re-check block here — the 30s poll fallback handles the case where
+        // a new user message arrives while the bridge is processing. The previous
+        // re-check caused duplicate processing: it called sendMessage() without
+        // holding instanceLocks, racing with Realtime events for the same message.
       }
     )
     .subscribe((status: string) => {
@@ -1149,6 +1119,15 @@ async function initBridge(
             .catch((err: any) => {
               console.error(`[bridge-poll] Failed for ${inst.id}:`, err);
             });
+        } else {
+          // Latest message is assistant/tool — instance is stuck "queued" after
+          // the bridge already processed it (e.g., API route set "queued" after
+          // the bridge finished). Reset to idle.
+          console.log(`[bridge-poll] Instance ${inst.id} is queued but latest message is ${latest?.[0]?.role ?? "empty"}, resetting to idle`);
+          await bridgeSupabase
+            .from("instances")
+            .update({ status: "idle", updated_at: new Date().toISOString() })
+            .eq("id", inst.id);
         }
       }
     } catch (err) {

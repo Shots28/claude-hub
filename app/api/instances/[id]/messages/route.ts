@@ -169,7 +169,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ message: existingMsg, queued: alreadyBusy, deduplicated: true }, { status: 201 });
     }
 
-    // Insert into chat_messages (the realtime table)
+    // Only update status to "queued" if instance is idle/stopped
+    // If already running or queued, leave status alone (message will be processed in order)
+    const isAlreadyBusy = currentStatus === "running" || currentStatus === "queued";
+
+    // CRITICAL: Set instance status to "queued" BEFORE inserting the message.
+    // The INSERT triggers a Supabase Realtime event that the bridge picks up instantly.
+    // If we set status AFTER the insert (like auto-naming queries), the bridge can
+    // finish processing before the UPDATE runs, and the UPDATE overwrites the bridge's
+    // "idle" status back to "queued" — leaving the instance stuck or causing the poll
+    // to re-process the same message.
+    if (!isAlreadyBusy) {
+      await (supabase.from("instances") as any)
+        .update({ status: "queued", updated_at: new Date().toISOString() })
+        .eq("id", id);
+    }
+
+    // Insert into chat_messages (the realtime table) — this triggers Realtime
     console.log("[messages/POST] Inserting user message for instance:", id, "content length:", content.length);
     const { data, error } = await (supabase.from("chat_messages") as any)
       .insert({
@@ -183,6 +199,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (error) {
       console.error("[messages/POST] DB insert error:", error);
+      // Reset status if insert failed
+      if (!isAlreadyBusy) {
+        await (supabase.from("instances") as any)
+          .update({ status: "idle", updated_at: new Date().toISOString() })
+          .eq("id", id);
+      }
       return NextResponse.json(
         { error: "Failed to send message" },
         { status: 500 },
@@ -191,52 +213,44 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     console.log("[messages/POST] User message inserted successfully, id:", data?.id);
 
-    // Only update status to "queued" if instance is idle/stopped
-    // If already running or queued, leave status alone (message will be processed in order)
-    const isAlreadyBusy = currentStatus === "running" || currentStatus === "queued";
-
-    // Auto-name instance from first user message if the name is still the default repo folder name.
-    // This gives instances human-readable names like "Fix the login bug" instead of "my-repo".
-    const instanceUpdates: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    };
-    if (!isAlreadyBusy) {
-      instanceUpdates.status = "queued";
-    }
-
-    // Check if this is the first user message — if so, auto-rename
+    // Auto-name instance from first user message (non-blocking, runs after response).
+    // This is separated from the status update to avoid delaying the INSERT and
+    // creating a race window where the bridge finishes before the API route.
     if (textContent) {
-      const { count: msgCount } = await supabase
-        .from("chat_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("instance_id", id)
-        .eq("role", "user");
+      // Fire-and-forget: auto-naming doesn't affect the response
+      (async () => {
+        try {
+          const { count: msgCount } = await supabase
+            .from("chat_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("instance_id", id)
+            .eq("role", "user");
 
-      if (msgCount !== null && msgCount <= 1) {
-        // First user message — get current instance name to check if it's a default folder name
-        const { data: inst } = await (supabase.from("instances") as any)
-          .select("name, repo_path")
-          .eq("id", id)
-          .maybeSingle();
+          if (msgCount !== null && msgCount <= 1) {
+            const { data: inst } = await (supabase.from("instances") as any)
+              .select("name, repo_path")
+              .eq("id", id)
+              .maybeSingle();
 
-        if (inst) {
-          const folderName = inst.repo_path?.split("/").pop() || "";
-          const isDefaultName = inst.name === folderName
-            || inst.name.match(new RegExp(`^${folderName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\(\\d+\\))?$`));
+            if (inst) {
+              const folderName = inst.repo_path?.split("/").pop() || "";
+              const isDefaultName = inst.name === folderName
+                || inst.name.match(new RegExp(`^${folderName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\(\\d+\\))?$`));
 
-          if (isDefaultName) {
-            // Rename to a truncated version of the first message
-            const autoName = textContent.slice(0, 80).replace(/\n/g, " ").trim();
-            instanceUpdates.name = autoName;
-            console.log(`[messages/POST] Auto-naming instance ${id}: "${inst.name}" → "${autoName}"`);
+              if (isDefaultName) {
+                const autoName = textContent.slice(0, 80).replace(/\n/g, " ").trim();
+                console.log(`[messages/POST] Auto-naming instance ${id}: "${inst.name}" → "${autoName}"`);
+                await (supabase.from("instances") as any)
+                  .update({ name: autoName })
+                  .eq("id", id);
+              }
+            }
           }
+        } catch (err) {
+          console.error("[messages/POST] Auto-naming error:", err);
         }
-      }
+      })();
     }
-
-    await (supabase.from("instances") as any)
-      .update(instanceUpdates)
-      .eq("id", id);
 
     return NextResponse.json({ message: data, queued: isAlreadyBusy }, { status: 201 });
   } catch (err) {

@@ -163,7 +163,8 @@ export function CreateInstanceModal({
 
         if (!res.ok) {
           const data = await res.json();
-          setError(data.error || "Failed to create instance");
+          const detail = data.details ? ` (${data.details})` : "";
+          setError((data.error || "Failed to create instance") + detail);
           return;
         }
 

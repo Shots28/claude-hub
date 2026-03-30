@@ -98,6 +98,8 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    // Normalize path: remove trailing slashes to prevent duplicate instances
+    const normalizedRepoPath = repoPath.replace(/\/+$/, "");
 
     const VALID_MODELS = ["opus", "sonnet", "haiku"];
     const VALID_PERMISSION_MODES = ["bypassPermissions", "acceptEdits", "plan", "default"];
@@ -125,7 +127,7 @@ export async function POST(req: NextRequest) {
       .insert({
         id,
         name: sanitizedName,
-        repo_path: repoPath,
+        repo_path: normalizedRepoPath,
         permission_mode: permissionMode ?? "bypassPermissions",
         allowed_tools: [],
         status: "stopped",
@@ -136,9 +138,9 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) {
-      console.error("[instances/POST] DB insert error:", error);
+      console.error("[instances/POST] DB insert error:", JSON.stringify(error));
       return NextResponse.json(
-        { error: "Failed to create instance" },
+        { error: "Failed to create instance", details: error.message, code: error.code },
         { status: 500 },
       );
     }

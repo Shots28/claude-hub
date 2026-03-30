@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useHubRealtime } from "@/lib/hub-context";
 
 interface LocalSession {
   id: string;
@@ -22,6 +23,7 @@ interface GlobalSessionPickerProps {
 
 export function GlobalSessionPicker({ onClose }: GlobalSessionPickerProps) {
   const router = useRouter();
+  const { refreshInstances } = useHubRealtime();
   const [sessions, setSessions] = useState<LocalSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export function GlobalSessionPicker({ onClose }: GlobalSessionPickerProps) {
           sessionId: session.id,
           repoPath: session.repoPath,
           repoName: session.repoName,
+          preview: session.preview,
         }),
       });
 
@@ -69,6 +72,8 @@ export function GlobalSessionPicker({ onClose }: GlobalSessionPickerProps) {
       }
 
       const data = await res.json();
+      // Refresh instance list so the new/updated instance is available
+      await refreshInstances();
       // Navigate to the instance
       router.push(`/instances/${data.instanceId}`);
       onClose();

@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { supabase } from "@/lib/supabase";
 import { getSessionFromCookies } from "@/lib/auth";
 
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { sessionId, repoPath, repoName } = body;
+    const { sessionId, repoPath, repoName, preview } = body;
 
     if (!sessionId || !repoPath) {
       return NextResponse.json(
@@ -32,30 +33,47 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Normalize repo path (remove trailing slash) to prevent duplicates
+    const normalizedPath = repoPath.replace(/\/+$/, "");
+
+    // Derive a name: prefer session preview (first user prompt), fall back to repo name
+    const folderName = repoName || normalizedPath.split("/").pop() || "Unnamed";
+    const instanceName = preview
+      ? preview.slice(0, 80).replace(/\n/g, " ").trim()
+      : folderName;
+
     // Find or create instance for this repo
     let instance: any;
-    const { data: existingInst } = await (supabase.from("instances") as any)
+    const { data: existingInstances } = await (supabase.from("instances") as any)
       .select("id, current_session_id")
-      .eq("repo_path", repoPath)
-      .maybeSingle();
+      .eq("repo_path", normalizedPath)
+      .limit(1);
+    const existingInst = existingInstances?.[0] ?? null;
 
     if (existingInst) {
       instance = existingInst;
     } else {
-      // Create new instance
+      // Create new instance — name from session preview or repo folder
       const { data: newInst, error: createError } = await (supabase.from("instances") as any)
         .insert({
-          name: repoName || repoPath.split("/").pop() || "Unnamed",
-          repo_path: repoPath,
+          id: randomUUID(),
+          name: instanceName,
+          repo_path: normalizedPath,
           status: "idle",
-          permission_mode: "default",
+          permission_mode: "bypassPermissions",
+          allowed_tools: [],
+          model: "sonnet",
+          max_thinking_tokens: 0,
         })
         .select()
         .single();
 
       if (createError) {
-        console.error("[sessions/import] Create instance error:", createError);
-        return NextResponse.json({ error: "Failed to create instance" }, { status: 500 });
+        console.error("[sessions/import] Create instance error:", JSON.stringify(createError));
+        return NextResponse.json(
+          { error: "Failed to create instance", details: createError.message },
+          { status: 500 }
+        );
       }
       instance = newInst;
     }

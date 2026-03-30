@@ -171,14 +171,49 @@ export async function POST(req: NextRequest, context: RouteContext) {
     // Only update status to "queued" if instance is idle/stopped
     // If already running or queued, leave status alone (message will be processed in order)
     const isAlreadyBusy = currentStatus === "running" || currentStatus === "queued";
+
+    // Auto-name instance from first user message if the name is still the default repo folder name.
+    // This gives instances human-readable names like "Fix the login bug" instead of "my-repo".
+    const instanceUpdates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
     if (!isAlreadyBusy) {
-      await (supabase.from("instances") as any)
-        .update({
-          status: "queued",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id);
+      instanceUpdates.status = "queued";
     }
+
+    // Check if this is the first user message — if so, auto-rename
+    if (textContent) {
+      const { count: msgCount } = await supabase
+        .from("chat_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("instance_id", id)
+        .eq("role", "user");
+
+      if (msgCount !== null && msgCount <= 1) {
+        // First user message — get current instance name to check if it's a default folder name
+        const { data: inst } = await (supabase.from("instances") as any)
+          .select("name, repo_path")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (inst) {
+          const folderName = inst.repo_path?.split("/").pop() || "";
+          const isDefaultName = inst.name === folderName
+            || inst.name.match(new RegExp(`^${folderName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\(\\d+\\))?$`));
+
+          if (isDefaultName) {
+            // Rename to a truncated version of the first message
+            const autoName = textContent.slice(0, 80).replace(/\n/g, " ").trim();
+            instanceUpdates.name = autoName;
+            console.log(`[messages/POST] Auto-naming instance ${id}: "${inst.name}" → "${autoName}"`);
+          }
+        }
+      }
+    }
+
+    await (supabase.from("instances") as any)
+      .update(instanceUpdates)
+      .eq("id", id);
 
     return NextResponse.json({ message: data, queued: isAlreadyBusy }, { status: 201 });
   } catch (err) {

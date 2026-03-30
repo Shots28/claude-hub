@@ -132,10 +132,16 @@ components/
     streaming-text.tsx            # Animated text rendering for streaming responses
     resource-monitor.tsx          # System memory/CPU metrics display
     connection-status.tsx         # Unified connectivity banner (offline/bridge/realtime)
+    global-session-picker.tsx     # Desktop session picker modal (all repos)
   ui/                             # Base UI components
 
 supabase/
-  migrations/                     # 8 SQL migration files (applied sequentially by timestamp)
+  migrations/                     # 10 SQL migration files (applied sequentially by timestamp)
+
+e2e/
+  auth-setup.ts                   # JWT cookie helper for authenticated tests
+  session-sync.spec.ts            # Desktop→phone session sync tests (7 tests)
+  final-qa.spec.ts                # Full QA test suite (21 tests)
 
 scripts/
   backup.sh                      # Backup SDK session files + metadata (keeps last 10)

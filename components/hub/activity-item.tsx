@@ -107,6 +107,8 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
   if (toolName === "Edit") {
     const filePath = input.file_path as string || "";
     const fileName = filePath.split("/").pop() || "file";
+    const oldString = input.old_string as string || "";
+    const newString = input.new_string as string || "";
     return {
       type: "file_edit",
       title: "Edited file",
@@ -118,7 +120,7 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
       ),
       color: "text-yellow-400",
       bgColor: "bg-yellow-500/10",
-      details: { path: filePath },
+      details: { path: filePath, old_string: oldString, new_string: newString },
     };
   }
 
@@ -390,9 +392,37 @@ export function ActivityItem({ message, onViewPlan, onSendResponse, recentPlanPa
       {/* Expanded details */}
       {expanded && activity.details && (
         <div className="mt-1 ml-9 mr-2 p-2 rounded-lg bg-hub-surface border border-hub-border">
-          <pre className="text-[11px] text-hub-text-muted overflow-x-auto whitespace-pre-wrap">
-            {JSON.stringify(activity.details, null, 2)}
-          </pre>
+          {/* Special diff view for Edit tool */}
+          {activity.type === "file_edit" && activity.details.old_string && activity.details.new_string ? (
+            <div className="flex flex-col gap-2 text-[11px]">
+              {/* File path */}
+              <div className="text-hub-text-muted font-mono truncate">
+                {activity.details.path as string}
+              </div>
+              {/* Removed */}
+              <div className="rounded bg-red-500/10 border border-red-500/20 p-2 overflow-x-auto">
+                <div className="text-red-400 text-[10px] font-medium mb-1 flex items-center gap-1">
+                  <span>−</span> Removed
+                </div>
+                <pre className="text-red-300/90 whitespace-pre-wrap font-mono break-all">
+                  {activity.details.old_string as string}
+                </pre>
+              </div>
+              {/* Added */}
+              <div className="rounded bg-emerald-500/10 border border-emerald-500/20 p-2 overflow-x-auto">
+                <div className="text-emerald-400 text-[10px] font-medium mb-1 flex items-center gap-1">
+                  <span>+</span> Added
+                </div>
+                <pre className="text-emerald-300/90 whitespace-pre-wrap font-mono break-all">
+                  {activity.details.new_string as string}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <pre className="text-[11px] text-hub-text-muted overflow-x-auto whitespace-pre-wrap">
+              {JSON.stringify(activity.details, null, 2)}
+            </pre>
+          )}
         </div>
       )}
 

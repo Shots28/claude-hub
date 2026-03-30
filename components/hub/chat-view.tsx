@@ -13,6 +13,7 @@ import { FileViewer } from "./file-viewer";
 import { PlanViewer } from "./plan-viewer";
 import { FileActivity } from "./file-activity";
 import { TaskPanel, useTaskCount } from "./task-panel";
+import { SessionPicker } from "./session-picker";
 import { useBridgeStatus } from "@/lib/use-bridge-status";
 import { useFileActivity } from "@/lib/use-file-activity";
 import type {
@@ -119,11 +120,12 @@ export function ChatView({
   const [updatingModel, setUpdatingModel] = useState(false);
   const bridgeStatus = useBridgeStatus();
 
-  // File viewer / plan viewer / file activity / tasks state
+  // File viewer / plan viewer / file activity / tasks / sessions state
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [viewingPlan, setViewingPlan] = useState<string | null>(null);
   const [showFileActivity, setShowFileActivity] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
   const taskCount = useTaskCount();
 
   // Load messages when instance changes OR component mounts
@@ -406,6 +408,19 @@ export function ChatView({
               </svg>
               Tasks{taskCount > 0 && ` (${taskCount})`}
             </button>
+
+            {/* Sessions - sync with IDE */}
+            <button
+              type="button"
+              onClick={() => setShowSessions(true)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 transition-all"
+              title="Continue a session from VS Code / CLI"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+              </svg>
+              Sync
+            </button>
           </div>
         </div>
       </div>
@@ -491,6 +506,19 @@ export function ChatView({
           handleSend(text);
         }}
       />
+
+      {/* Session picker - for syncing with IDE */}
+      {showSessions && (
+        <SessionPicker
+          instanceId={instance.id}
+          currentSessionId={instance.current_session_id}
+          onClose={() => setShowSessions(false)}
+          onSessionSwitch={() => {
+            // Reload messages after switching session
+            onLoadMessages(instance.id);
+          }}
+        />
+      )}
     </div>
   );
 }

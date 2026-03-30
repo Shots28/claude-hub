@@ -20,6 +20,9 @@ data/events.log
 data/.jwt-secret
 data/backups/
 
+# Test artifacts
+test-results/
+
 # OS
 .DS_Store
 Thumbs.db

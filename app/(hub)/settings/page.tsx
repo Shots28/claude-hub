@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
-import { requestPushPermission, resubscribePush, isPushDenied } from "@/lib/push-client";
+import { requestPushPermission, resubscribePush, isPushDenied, getVapidPublicKey } from "@/lib/push-client";
 
 interface BridgeStatus {
   online: boolean;
@@ -28,7 +28,8 @@ export default function SettingsPage() {
     const hasSW = "serviceWorker" in navigator;
     const perm = hasNotif ? Notification.permission : "N/A";
     const denied = isPushDenied();
-    setPushDebug(`Notification: ${hasNotif}, SW: ${hasSW}, perm: ${perm}, localStorage denied: ${denied}`);
+    const vapid = getVapidPublicKey();
+    setPushDebug(`perm: ${perm}, denied: ${denied}, vapid: ${vapid ? vapid.slice(0, 10) + "..." : "MISSING"}`);
 
     if (!hasNotif || !hasSW) {
       setPushState("unsupported");

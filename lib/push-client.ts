@@ -6,6 +6,17 @@
 
 const PUSH_DENIED_KEY = "pushDenied";
 
+// VAPID public key — safe to be in source code (it's public).
+// Avoids NEXT_PUBLIC_ build-time inlining issues where turbopack
+// fails to replace process.env in library files.
+const VAPID_PUBLIC_KEY = "BC-jAqrxd2oHCz4CSk4XqElax_wPQH03HdbjaXtpkHIEALlXrMwknthmxAvjNZJZCGkUjWkfiHekqcqK4OkCTWU";
+
+export function getVapidPublicKey(): string | undefined {
+  // Prefer env var (for local dev flexibility), fall back to hardcoded
+  return (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
+    || VAPID_PUBLIC_KEY;
+}
+
 /**
  * Check if the user has permanently dismissed push notifications.
  */
@@ -36,7 +47,7 @@ export function markPushDenied(): void {
 export async function subscribeToPush(forceNew = false): Promise<boolean> {
   try {
     const registration = await navigator.serviceWorker.ready;
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const vapidPublicKey = getVapidPublicKey();
 
     if (!vapidPublicKey) {
       console.warn("[push] NEXT_PUBLIC_VAPID_PUBLIC_KEY not set — skipping push subscription");
@@ -138,7 +149,7 @@ export async function resubscribePush(): Promise<{ ok: boolean; error?: string }
   // Permission granted — try to subscribe
   try {
     const registration = await navigator.serviceWorker.ready;
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const vapidPublicKey = getVapidPublicKey();
 
     if (!vapidPublicKey) {
       return { ok: false, error: "VAPID key not configured (build-time env missing)" };

@@ -117,26 +117,63 @@ export async function requestPushPermission(): Promise<boolean> {
  * Re-subscribe to push notifications. Clears the "denied" flag,
  * unsubscribes the old push subscription, and creates a fresh one.
  * Use when VAPID keys change or the subscription expires.
+ * Returns { ok, error } so the UI can show what went wrong.
  */
-export async function resubscribePush(): Promise<boolean> {
+export async function resubscribePush(): Promise<{ ok: boolean; error?: string }> {
   // Clear the denied flag so we can try again
   try {
     localStorage.removeItem(PUSH_DENIED_KEY);
   } catch { /* ignore */ }
 
-  if (!("Notification" in window)) return false;
+  if (!("Notification" in window)) return { ok: false, error: "Notification API not available" };
 
-  if (Notification.permission === "granted") {
-    return subscribeToPush(true); // force new subscription
+  let perm = Notification.permission;
+  if (perm !== "granted") {
+    perm = await Notification.requestPermission();
+  }
+  if (perm !== "granted") {
+    return { ok: false, error: `Permission: ${perm}` };
   }
 
-  // Permission not granted — request it fresh
-  const result = await Notification.requestPermission();
-  if (result === "granted") {
-    return subscribeToPush(true);
-  }
+  // Permission granted — try to subscribe
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
-  return false;
+    if (!vapidPublicKey) {
+      return { ok: false, error: "VAPID key not configured (build-time env missing)" };
+    }
+
+    const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey).buffer as ArrayBuffer;
+
+    // Unsubscribe old
+    const oldSub = await registration.pushManager.getSubscription();
+    if (oldSub) {
+      await oldSub.unsubscribe();
+    }
+
+    // Create fresh subscription
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey,
+    });
+
+    // Send to API
+    const res = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `API ${res.status}: ${text}` };
+    }
+
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 /**

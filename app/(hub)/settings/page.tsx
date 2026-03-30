@@ -47,8 +47,15 @@ export default function SettingsPage() {
 
   const handleResubscribe = async () => {
     setPushState("subscribing");
-    const success = await resubscribePush();
-    setPushState(success ? "granted" : "denied");
+    setPushDebug("Re-subscribing...");
+    const result = await resubscribePush();
+    if (result.ok) {
+      setPushState("granted");
+      setPushDebug("Subscribed successfully!");
+    } else {
+      setPushState("denied");
+      setPushDebug(`Failed: ${result.error}`);
+    }
   };
 
   const fetchBridgeStatus = useCallback(async () => {

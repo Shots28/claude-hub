@@ -221,6 +221,17 @@ async function scanLocalSessions(): Promise<LocalSession[]> {
           let userCount = 0;
           let assistantCount = 0;
 
+          // Extract clean preview text, stripping IDE/system context tags
+          function extractCleanPreview(text: string): string {
+            // Strip XML-like tags and their content (e.g., <ide_selection>..., <system-reminder>...)
+            let clean = text.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "");
+            // Strip any remaining self-closing or orphaned tags
+            clean = clean.replace(/<[^>]*>/g, "");
+            // Collapse whitespace
+            clean = clean.replace(/\s+/g, " ").trim();
+            return clean;
+          }
+
           for (const line of lines) {
             try {
               const entry = JSON.parse(line);
@@ -230,11 +241,16 @@ async function scanLocalSessions(): Promise<LocalSession[]> {
                 userCount++;
                 if (!firstUserMessage && entry.message?.content) {
                   const msgContent = entry.message.content;
+                  let rawText = "";
                   if (typeof msgContent === "string") {
-                    firstUserMessage = msgContent.slice(0, 100);
+                    rawText = msgContent;
                   } else if (Array.isArray(msgContent)) {
                     const textBlock = msgContent.find((c: any) => c.type === "text");
-                    if (textBlock?.text) firstUserMessage = textBlock.text.slice(0, 100);
+                    if (textBlock?.text) rawText = textBlock.text;
+                  }
+                  const cleaned = extractCleanPreview(rawText);
+                  if (cleaned.length > 0) {
+                    firstUserMessage = cleaned.slice(0, 100);
                   }
                 }
               } else if (entry.type === "assistant") {
@@ -612,6 +628,134 @@ async function initBridge(
     console.log(`[bridge] Imported ${messagesToInsert.length} messages for session ${sessionId.slice(0, 8)}...`);
   }
 
+  // --- Live session sync: desktop IDE → phone ---
+  // Polls active session JSONL files for new messages written by the desktop IDE/CLI
+  // and appends them to chat_messages so the phone sees them in real time.
+  // Uses append-only sync to avoid triggering the bridge's Realtime handler.
+  const sessionFileMtimes = new Map<string, number>(); // instanceId → last known mtime
+  const sessionMessageCounts = new Map<string, number>(); // instanceId → JSONL msg count at last sync
+
+  async function syncActiveSessionFiles() {
+    const { readFile, stat: fsStat } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { homedir } = await import("node:os");
+
+    if (localInstanceIds.size === 0) return;
+
+    // Get all local instances with a current_session_id
+    const { data: instances } = await bridgeSupabase
+      .from("instances")
+      .select("id, repo_path, current_session_id, status")
+      .in("id", Array.from(localInstanceIds))
+      .not("current_session_id", "is", null);
+
+    if (!instances?.length) return;
+
+    for (const inst of instances) {
+      // Skip instances the bridge is actively processing (it writes its own messages)
+      if (inst.status === "running" || inst.status === "queued") continue;
+
+      const projectKey = inst.repo_path.replace(/\//g, "-");
+      const sessionPath = join(homedir(), ".claude", "projects", projectKey, `${inst.current_session_id}.jsonl`);
+
+      // Check mtime — skip if file hasn't changed
+      const fileStat = await fsStat(sessionPath).catch(() => null);
+      if (!fileStat) continue;
+
+      const lastMtime = sessionFileMtimes.get(inst.id) || 0;
+      if (fileStat.mtimeMs <= lastMtime) continue;
+
+      sessionFileMtimes.set(inst.id, fileStat.mtimeMs);
+
+      // Parse ALL messages from the JSONL
+      let content: string;
+      try {
+        content = await readFile(sessionPath, "utf-8");
+      } catch { continue; }
+
+      const lines = content.trim().split("\n").filter(Boolean);
+      const jsonlMessages: any[] = [];
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type !== "user" && entry.type !== "assistant") continue;
+          let msgContent = "";
+          const mc = entry.message?.content;
+          if (typeof mc === "string") msgContent = mc;
+          else if (Array.isArray(mc)) {
+            msgContent = mc.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+          }
+          if (!msgContent) continue;
+          jsonlMessages.push({
+            role: entry.type === "user" ? "user" : "assistant",
+            content: msgContent,
+            created_at: entry.timestamp || new Date().toISOString(),
+          });
+        } catch { /* skip */ }
+      }
+
+      // Check how many messages we last synced for this session
+      const lastSyncedCount = sessionMessageCounts.get(inst.id) || 0;
+
+      if (jsonlMessages.length <= lastSyncedCount) continue; // No new messages
+
+      // Only insert messages beyond what we last synced
+      const newMessages = jsonlMessages.slice(lastSyncedCount);
+      sessionMessageCounts.set(inst.id, jsonlMessages.length);
+
+      console.log(`[session-sync] ${newMessages.length} new messages for ${inst.id.slice(0, 8)}... (${lastSyncedCount} → ${jsonlMessages.length})`);
+
+      const toInsert = newMessages.map(m => ({
+        instance_id: inst.id,
+        role: m.role,
+        content: m.content,
+        status: "done",
+        created_at: m.created_at,
+        tool_name: null,
+        tool_id: null,
+      }));
+
+      const BATCH = 500;
+      for (let i = 0; i < toInsert.length; i += BATCH) {
+        const batch = toInsert.slice(i, i + BATCH);
+        const { data: inserted, error } = await bridgeSupabase
+          .from("chat_messages")
+          .insert(batch)
+          .select("id, role");
+        if (error) {
+          console.error(`[session-sync] Insert error:`, error);
+        } else if (inserted) {
+          // Mark inserted user messages as already-processed so the bridge's
+          // Realtime handler doesn't try to execute them as new user queries
+          for (const msg of inserted) {
+            if (msg.role === "user") {
+              processedMessageIds.add(msg.id);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Initialize message counts from DB so we don't re-sync on startup
+  async function initSessionSyncCounts() {
+    if (localInstanceIds.size === 0) return;
+    const { data: instances } = await bridgeSupabase
+      .from("instances")
+      .select("id, current_session_id")
+      .in("id", Array.from(localInstanceIds))
+      .not("current_session_id", "is", null);
+    if (!instances?.length) return;
+
+    for (const inst of instances) {
+      const { count } = await bridgeSupabase
+        .from("chat_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("instance_id", inst.id);
+      if (count) sessionMessageCounts.set(inst.id, count);
+    }
+  }
+
   // Refresh local repo paths when discovered_repos changes (e.g., user triggers rescan)
   bridgeSupabase
     .channel("bridge-discovered-repos")
@@ -715,6 +859,17 @@ async function initBridge(
     console.log(`[bridge] Cleaned up ${orphanedMsgs.length} orphaned streaming messages`);
   }
 
+  // --- Deduplication: track processed message IDs and per-instance locks ---
+  // Supabase Realtime has at-least-once delivery, so duplicate events are possible.
+  // We track processed message IDs to avoid re-processing the same user message.
+  const processedMessageIds = new Set<string>();
+  const instanceLocks = new Set<string>(); // Synchronous lock before any async work
+
+  // Evict old entries periodically to prevent unbounded growth
+  setInterval(() => {
+    processedMessageIds.clear();
+  }, 5 * 60_000); // Clear every 5 minutes
+
   // --- Supabase Realtime subscription (primary trigger) ---
   const channel = bridgeSupabase
     .channel("bridge-messages")
@@ -727,8 +882,15 @@ async function initBridge(
         filter: "role=eq.user",
       },
       async (payload: any) => {
-        const { instance_id: instanceId, content } = payload.new;
+        const { id: messageId, instance_id: instanceId, content } = payload.new;
         if (!instanceId || !content) return;
+
+        // Deduplicate: skip if we've already processed this exact message
+        if (messageId && processedMessageIds.has(messageId)) {
+          console.log(`[bridge] Skipping duplicate Realtime event for message ${messageId}`);
+          return;
+        }
+        if (messageId) processedMessageIds.add(messageId);
 
         // Only process local instances — check cache first, then DB fallback
         if (!localInstanceIds.has(instanceId)) {
@@ -737,6 +899,18 @@ async function initBridge(
           if (!inst || !localRepoPaths.has(inst.repo_path)) return;
           // Update cache
           localInstanceIds.add(instanceId);
+        }
+
+        // Synchronous lock: prevent concurrent async processing for the same instance.
+        // This closes the race window between isRunning() check and activeQueries.set()
+        // inside sendMessage(), where duplicate Realtime events could both slip through.
+        if (instanceLocks.has(instanceId)) {
+          console.log(`[bridge] Instance ${instanceId} locked, marking queued for poll pickup`);
+          await bridgeSupabase
+            .from("instances")
+            .update({ status: "queued", updated_at: new Date().toISOString() })
+            .eq("id", instanceId);
+          return;
         }
 
         // Skip if already running — mark as queued so the poll picks it up
@@ -749,7 +923,10 @@ async function initBridge(
           return;
         }
 
-        console.log(`[bridge] Executing message for instance ${instanceId}`);
+        // Acquire synchronous lock BEFORE any async work
+        instanceLocks.add(instanceId);
+
+        console.log(`[bridge] Executing message for instance ${instanceId} (msg: ${messageId})`);
         try {
           await manager.sendMessage(instanceId, content);
         } catch (err) {
@@ -766,22 +943,30 @@ async function initBridge(
           } catch (dbErr) {
             console.error("[bridge] Failed to update error status:", dbErr);
           }
+        } finally {
+          instanceLocks.delete(instanceId);
         }
 
         // After completion, re-check for newer unprocessed user messages
         try {
           const { data: latest } = await bridgeSupabase
             .from("chat_messages")
-            .select("role, content")
+            .select("id, role, content")
             .eq("instance_id", instanceId)
             .order("created_at", { ascending: false })
             .limit(1);
 
           if (latest?.[0]?.role === "user" && !manager.isRunning(instanceId)) {
-            console.log(`[bridge] Re-processing pending message for instance ${instanceId}`);
-            manager.sendMessage(instanceId, latest[0].content).catch((err: any) => {
-              console.error(`[bridge] Re-process failed for ${instanceId}:`, err);
-            });
+            // Skip if we already processed this specific message
+            if (latest[0].id && processedMessageIds.has(latest[0].id)) {
+              console.log(`[bridge] Re-check: message ${latest[0].id} already processed, skipping`);
+            } else {
+              if (latest[0].id) processedMessageIds.add(latest[0].id);
+              console.log(`[bridge] Re-processing pending message ${latest[0].id} for instance ${instanceId}`);
+              manager.sendMessage(instanceId, latest[0].content).catch((err: any) => {
+                console.error(`[bridge] Re-process failed for ${instanceId}:`, err);
+              });
+            }
           }
         } catch (err) {
           console.error(`[bridge] Re-check failed for ${instanceId}:`, err);
@@ -791,6 +976,17 @@ async function initBridge(
     .subscribe((status: string) => {
       console.log(`[bridge] Realtime subscription: ${status}`);
     });
+
+  // --- Start live session sync (desktop IDE → phone) ---
+  // Initialize counts from DB so we don't re-import existing messages on startup
+  initSessionSyncCounts().then(() => {
+    console.log("[session-sync] Initialized message counts, starting 10s poll");
+  });
+  setInterval(() => {
+    syncActiveSessionFiles().catch(err => {
+      console.error("[session-sync] Error:", err);
+    });
+  }, 10_000);
 
   // --- Periodic poll fallback (every 30s) ---
   // Deduplication: the poll only processes a queued instance if the latest message
@@ -828,13 +1024,23 @@ async function initBridge(
 
         const { data: latest } = await bridgeSupabase
           .from("chat_messages")
-          .select("role, content")
+          .select("id, role, content")
           .eq("instance_id", inst.id)
           .order("created_at", { ascending: false })
           .limit(1);
 
         if (latest?.[0]?.role === "user") {
-          console.log(`[bridge-poll] Processing queued instance ${inst.id}`);
+          // Skip if this message was already processed by Realtime handler
+          if (latest[0].id && processedMessageIds.has(latest[0].id)) {
+            console.log(`[bridge-poll] Message ${latest[0].id} already processed, resetting instance ${inst.id} to idle`);
+            await bridgeSupabase
+              .from("instances")
+              .update({ status: "idle", updated_at: new Date().toISOString() })
+              .eq("id", inst.id);
+            continue;
+          }
+          if (latest[0].id) processedMessageIds.add(latest[0].id);
+          console.log(`[bridge-poll] Processing queued instance ${inst.id} (msg: ${latest[0].id})`);
           manager.sendMessage(inst.id, latest[0].content).catch((err: any) => {
             console.error(`[bridge-poll] Failed for ${inst.id}:`, err);
           });

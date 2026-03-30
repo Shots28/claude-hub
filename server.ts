@@ -566,11 +566,20 @@ async function initBridge(
         await manager.interrupt(id);
       }
 
-      // Detect session import: session_id changed and instance is local
+      // Detect session import: session_id changed and instance is local.
+      // CRITICAL: Skip if the instance is locked (bridge is actively processing it).
+      // When the SDK returns a new session_id during sendMessage(), it updates current_session_id
+      // in the DB, which triggers this handler. Without this guard, importSessionMessages() would
+      // delete all messages and re-import from JSONL — including the user message that's being
+      // processed — creating a duplicate that the bridge executes again.
       if (current_session_id && current_session_id !== oldSessionId && repo_path) {
-        importSessionMessages(id, current_session_id, repo_path).catch(err => {
-          console.error(`[bridge] Session import failed for ${id}:`, err);
-        });
+        if (instanceLocks.has(id) || manager.isRunning(id)) {
+          console.log(`[bridge] Skipping session import for ${id} — instance is actively processing`);
+        } else {
+          importSessionMessages(id, current_session_id, repo_path).catch(err => {
+            console.error(`[bridge] Session import failed for ${id}:`, err);
+          });
+        }
       }
     })
     .subscribe();
@@ -643,16 +652,31 @@ async function initBridge(
       .eq("instance_id", instanceId);
 
     // Insert in batches (Supabase REST limit)
+    // Use .select("id, role") to get back IDs so we can mark user messages as processed
+    // (prevents the Realtime handler from picking them up as new messages)
     const BATCH = 500;
     for (let i = 0; i < messagesToInsert.length; i += BATCH) {
       const batch = messagesToInsert.slice(i, i + BATCH);
-      const { error } = await bridgeSupabase
+      const { data: inserted, error } = await bridgeSupabase
         .from("chat_messages")
-        .insert(batch);
+        .insert(batch)
+        .select("id, role");
       if (error) {
         console.error(`[bridge] Message insert error (batch ${i / BATCH}):`, error);
       }
+      // Mark imported user messages as processed so Realtime handler skips them
+      if (inserted) {
+        for (const msg of inserted) {
+          if (msg.role === "user" && msg.id) {
+            processedMessageIds.set(msg.id, Date.now());
+          }
+        }
+      }
     }
+
+    // Update session sync count to match the imported JSONL state
+    const jsonlCount = messagesToInsert.length;
+    sessionMessageCounts.set(instanceId, jsonlCount);
 
     console.log(`[bridge] Imported ${messagesToInsert.length} messages for session ${sessionId.slice(0, 8)}...`);
   }

@@ -16,6 +16,7 @@ export interface Attachment {
 }
 
 interface ChatInputProps {
+  instanceId: string;
   onSend: (text: string, attachments?: Attachment[]) => Promise<void>;
   onInterrupt: () => void;
   instanceStatus: InstanceStatus;
@@ -23,14 +24,45 @@ interface ChatInputProps {
   modeBorderClass?: string;
 }
 
+const DRAFT_STORAGE_KEY = "claude-hub-drafts";
+
+function getDrafts(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveDraft(instanceId: string, text: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const drafts = getDrafts();
+    if (text.trim()) {
+      drafts[instanceId] = text;
+    } else {
+      delete drafts[instanceId];
+    }
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  } catch {
+    // Storage full or unavailable
+  }
+}
+
+function loadDraft(instanceId: string): string {
+  return getDrafts()[instanceId] || "";
+}
+
 export function ChatInput({
+  instanceId,
   onSend,
   onInterrupt,
   instanceStatus,
   disabled = false,
   modeBorderClass = "border-hub-border focus-within:border-hub-accent/50",
 }: ChatInputProps) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => loadDraft(instanceId));
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -38,6 +70,19 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+
+  // Load draft when switching instances
+  useEffect(() => {
+    setText(loadDraft(instanceId));
+  }, [instanceId]);
+
+  // Save draft when text changes (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveDraft(instanceId, text);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [instanceId, text]);
 
   const isRunning = instanceStatus === "running";
   const isQueued = instanceStatus === "queued";
@@ -69,6 +114,7 @@ export function ChatInput({
     const currentAttachments = [...attachments];
     setText("");
     setAttachments([]);
+    saveDraft(instanceId, ""); // Clear draft on send
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }

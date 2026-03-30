@@ -445,6 +445,7 @@ export function ChatView({
 
       {/* Input */}
       <ChatInput
+        instanceId={instance.id}
         onSend={handleSend}
         onInterrupt={handleInterrupt}
         instanceStatus={instance.status as InstanceStatus}

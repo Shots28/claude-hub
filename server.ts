@@ -427,20 +427,44 @@ async function initBridge(
     }
   }
 
+  // Helper to get the last assistant message for a completion summary
+  async function getLastAssistantPreview(instanceId: string): Promise<string> {
+    try {
+      const { data } = await bridgeSupabase
+        .from("chat_messages")
+        .select("content")
+        .eq("instance_id", instanceId)
+        .eq("role", "assistant")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (data?.[0]?.content) {
+        // Strip markdown, collapse whitespace, truncate
+        const clean = data[0].content
+          .replace(/```[\s\S]*?```/g, "[code]")
+          .replace(/[#*_~`>]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return clean.length > 120 ? clean.slice(0, 120) + "…" : clean;
+      }
+    } catch { /* best effort */ }
+    return "Claude finished processing.";
+  }
+
   // --- Push notification triggers ---
   // Fire when Claude finishes (idle), needs permission, or errors
   manager.on("status_change", async (instanceId: string, status: string, error?: string) => {
     const name = await getInstanceName(instanceId);
     if (status === "idle") {
+      const preview = await getLastAssistantPreview(instanceId);
       sendPushNotification({
-        title: `${name} completed`,
-        body: "Claude finished processing.",
+        title: `✓ ${name}`,
+        body: preview,
         instanceId,
         tag: `idle-${instanceId}`,
       });
     } else if (status === "error") {
       sendPushNotification({
-        title: `${name} error`,
+        title: `✗ ${name}`,
         body: error || "An error occurred.",
         instanceId,
         tag: `error-${instanceId}`,
@@ -450,9 +474,14 @@ async function initBridge(
 
   manager.on("permission_request", async (instanceId: string, data: any) => {
     const name = await getInstanceName(instanceId);
+    const toolDesc = data.toolName === "Bash"
+      ? `Run command: ${(data.toolInput?.command || "").slice(0, 80)}`
+      : data.toolName === "Edit" || data.toolName === "Write"
+      ? `${data.toolName}: ${(data.toolInput?.file_path || "").split("/").pop()}`
+      : `${data.toolName}`;
     sendPushNotification({
-      title: `${name} needs approval`,
-      body: `Permission requested: ${data.toolName}`,
+      title: `⏸ ${name} — needs approval`,
+      body: toolDesc,
       instanceId,
       tag: `perm-${data.id}`,
     });

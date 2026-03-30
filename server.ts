@@ -593,10 +593,31 @@ async function initBridge(
       // CRITICAL: Strip leading slashes before resolving to prevent path.resolve
       // from treating the file path as absolute (bypassing containment check).
       const sanitized = rawFilePath.replace(/^\/+/, "");
-      const resolved = pathResolve(repoPath, sanitized);
+      let resolved = pathResolve(repoPath, sanitized);
+      let isGlobalClaudePath = false;
 
-      // Containment check: resolved path must be inside repoPath
-      if (!resolved.startsWith(resolvedRepoPath + "/") && resolved !== resolvedRepoPath) {
+      // Special case: .claude/plans/ files may be in the global ~/.claude/plans/ directory
+      // Claude CLI often writes plans there instead of in the repo
+      if (sanitized.startsWith(".claude/plans/")) {
+        try {
+          await realpath(resolved); // Check if exists in repo
+        } catch {
+          // Not in repo, try global ~/.claude/plans/
+          const homeDir = process.env.HOME || "/Users/agents";
+          const globalPath = pathResolve(homeDir, sanitized);
+          try {
+            await realpath(globalPath);
+            resolved = globalPath;
+            isGlobalClaudePath = true;
+            console.log(`[bridge] File request ${id}: Found plan in global ~/.claude/plans/`);
+          } catch {
+            // File doesn't exist in either location
+          }
+        }
+      }
+
+      // Containment check: resolved path must be inside repoPath OR be a global .claude path
+      if (!isGlobalClaudePath && !resolved.startsWith(resolvedRepoPath + "/") && resolved !== resolvedRepoPath) {
         await bridgeSupabase
           .from("file_requests")
           .update({ status: "error", error_message: "Path traversal blocked", completed_at: new Date().toISOString() })
@@ -616,7 +637,8 @@ async function initBridge(
         return;
       }
 
-      if (!realPath.startsWith(resolvedRepoPath + "/") && realPath !== resolvedRepoPath) {
+      // Skip containment check for global .claude paths (they're not in the repo)
+      if (!isGlobalClaudePath && !realPath.startsWith(resolvedRepoPath + "/") && realPath !== resolvedRepoPath) {
         await bridgeSupabase
           .from("file_requests")
           .update({ status: "error", error_message: "Symlink outside repository", completed_at: new Date().toISOString() })

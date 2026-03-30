@@ -474,6 +474,11 @@ Instances can get stuck in "running" or "queued" status:
    - Must extract relative portion: `.claude/plans/my-plan.md`
    - Use regex capture: `filePath.match(/(\.claude\/plans\/.*\.md)$/)`
 
+7. **Claude writes plans to global ~/.claude/plans/, not repo**
+   - Claude CLI writes plan files to `~/.claude/plans/` (global), NOT `repo/.claude/plans/`
+   - Bridge now checks both locations: first repo, then `~/.claude/plans/`
+   - This allows viewing plans that Claude created in any repo
+
 ### Debug Endpoints
 
 - `GET /api/health/db` — Database connection status, message counts, insert/select test

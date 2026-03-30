@@ -41,7 +41,7 @@ function DragHandle({ onDragStart }: { onDragStart: (e: React.TouchEvent | React
   );
 }
 
-function MobileActionMenu({
+export function MobileActionMenu({
   instanceId,
   onDelete,
   onRename,
@@ -50,7 +50,7 @@ function MobileActionMenu({
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
-  onRename: (id: string) => void;
+  onRename: (id: string | void) => void;
   onClose: () => void;
   triggerElement: HTMLButtonElement | null;
 }) {

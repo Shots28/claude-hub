@@ -7,12 +7,13 @@ export const dynamic = "force-dynamic";
 // Desktop: Split view with sidebar + chat panel
 // ---------------------------------------------------------------------------
 
-import { useState, useMemo, useCallback, useEffect, Suspense } from "react";
+import { useState, useMemo, useCallback, useEffect, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ChatView } from "@/components/hub/chat-view";
 import { CreateInstanceModal } from "@/components/hub/create-instance-modal";
 import { StatusBadge } from "@/components/hub/status-badge";
+import { MobileActionMenu } from "@/components/hub/instance-list-mobile";
 import { useHubRealtime } from "@/lib/hub-context";
 import { useNeedsAttention } from "@/lib/use-needs-attention";
 import type { DbInstance, InstanceStatus } from "@/lib/types";
@@ -24,6 +25,12 @@ function ChatsPageContent() {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Menu state for mobile 3-dots
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const menuTriggerRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
 
   // Get instance ID from URL (desktop only)
   useEffect(() => {
@@ -75,6 +82,50 @@ function ChatsPageContent() {
     realtime.refreshInstances();
   }, [realtime]);
 
+  // Handle rename
+  const handleRename = useCallback((id: string, currentName: string) => {
+    setRenamingId(id);
+    setRenameValue(currentName);
+    setMenuOpenId(null);
+  }, []);
+
+  const submitRename = useCallback(async (id: string) => {
+    if (!renameValue.trim() || renameValue === renamingId) {
+      setRenamingId(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: renameValue.trim() }),
+      });
+      if (res.ok) {
+        handleRefresh();
+      }
+    } catch (err) {
+      console.error("Failed to rename:", err);
+    }
+    setRenamingId(null);
+  }, [renameValue, renamingId, handleRefresh]);
+
+  // Handle delete
+  const handleDelete = useCallback(async (id: string) => {
+    setMenuOpenId(null);
+    if (!confirm("Delete this chat? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`/api/instances/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        handleRefresh();
+        if (selectedId === id) {
+          setSelectedId(null);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete:", err);
+    }
+  }, [handleRefresh, selectedId]);
+
   // Chat list component - shared between mobile and desktop
   const ChatList = ({ isMobile = false }: { isMobile?: boolean }) => (
     <nav className="flex-1 overflow-y-auto py-2">
@@ -116,34 +167,84 @@ function ChatsPageContent() {
               const isSelected = !isMobile && inst.id === selectedId;
               const needsAtt = hasAttention(inst.id);
 
-              // Mobile: use Link to navigate
+              // Mobile: use Link to navigate with 3-dots menu
               if (isMobile) {
                 return (
-                  <Link
-                    key={inst.id}
-                    href={`/instances/${inst.id}`}
-                    className="flex items-center gap-3 mx-3 px-4 py-4 rounded-xl bg-hub-surface-2 hover:bg-hub-border active:bg-hub-border transition-colors mb-2"
-                  >
-                    <StatusBadge status={inst.status as InstanceStatus} size="md" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-base font-medium text-hub-text truncate">
-                        {inst.name}
-                      </div>
-                      {inst.last_message_preview && (
-                        <p className="text-sm text-hub-text-muted/60 truncate mt-0.5">
-                          {inst.last_message_preview}
-                        </p>
-                      )}
+                  <div key={inst.id} className="relative mx-3 mb-2">
+                    <div className="flex items-center rounded-xl bg-hub-surface-2 overflow-hidden">
+                      <Link
+                        href={`/instances/${inst.id}`}
+                        className="flex-1 flex items-center gap-3 px-4 py-4 hover:bg-hub-border active:bg-hub-border transition-colors"
+                      >
+                        <StatusBadge status={inst.status as InstanceStatus} size="md" />
+                        <div className="flex-1 min-w-0">
+                          {renamingId === inst.id ? (
+                            <input
+                              type="text"
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  submitRename(inst.id);
+                                } else if (e.key === "Escape") {
+                                  setRenamingId(null);
+                                }
+                              }}
+                              onBlur={() => submitRename(inst.id)}
+                              onClick={(e) => e.preventDefault()}
+                              autoFocus
+                              className="text-base font-medium w-full bg-hub-bg border border-hub-accent/50 rounded px-2 py-1 text-hub-text focus:outline-none focus:ring-1 focus:ring-hub-accent/50"
+                            />
+                          ) : (
+                            <div className="text-base font-medium text-hub-text truncate">
+                              {inst.name}
+                            </div>
+                          )}
+                          {inst.last_message_preview && (
+                            <p className="text-sm text-hub-text-muted/60 truncate mt-0.5">
+                              {inst.last_message_preview}
+                            </p>
+                          )}
+                        </div>
+                        {needsAtt && (
+                          <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white px-1.5 flex-shrink-0">
+                            !
+                          </span>
+                        )}
+                      </Link>
+
+                      {/* 3-dots menu button */}
+                      <button
+                        ref={(el) => { menuTriggerRefs.current.set(inst.id, el); }}
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
+                        }}
+                        className="flex-shrink-0 w-12 min-h-[60px] flex items-center justify-center border-l border-hub-border/30 bg-hub-surface-2/80 active:bg-hub-border transition-colors"
+                        aria-label="Chat options"
+                      >
+                        <svg className="w-5 h-5 text-hub-text-muted" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="5" r="2.5" />
+                          <circle cx="12" cy="12" r="2.5" />
+                          <circle cx="12" cy="19" r="2.5" />
+                        </svg>
+                      </button>
                     </div>
-                    {needsAtt && (
-                      <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white px-1.5 flex-shrink-0">
-                        !
-                      </span>
+
+                    {/* Action menu */}
+                    {menuOpenId === inst.id && (
+                      <MobileActionMenu
+                        instanceId={inst.id}
+                        onDelete={handleDelete}
+                        onRename={() => handleRename(inst.id, inst.name)}
+                        onClose={() => setMenuOpenId(null)}
+                        triggerElement={menuTriggerRefs.current.get(inst.id) ?? null}
+                      />
                     )}
-                    <svg className="w-5 h-5 text-hub-text-muted/40 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </Link>
+                  </div>
                 );
               }
 

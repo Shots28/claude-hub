@@ -20,13 +20,21 @@ export default function SettingsPage() {
   const [restartState, setRestartState] = useState<RestartState>("idle");
   const [pushState, setPushState] = useState<"unknown" | "granted" | "denied" | "unsupported" | "subscribing">("unknown");
 
+  const [pushDebug, setPushDebug] = useState<string>("");
+
   // Check notification permission on mount
   useEffect(() => {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+    const hasNotif = "Notification" in window;
+    const hasSW = "serviceWorker" in navigator;
+    const perm = hasNotif ? Notification.permission : "N/A";
+    const denied = isPushDenied();
+    setPushDebug(`Notification: ${hasNotif}, SW: ${hasSW}, perm: ${perm}, localStorage denied: ${denied}`);
+
+    if (!hasNotif || !hasSW) {
       setPushState("unsupported");
-    } else if (Notification.permission === "granted") {
+    } else if (perm === "granted") {
       setPushState("granted");
-    } else if (Notification.permission === "denied" || isPushDenied()) {
+    } else if (perm === "denied" || denied) {
       setPushState("denied");
     }
   }, []);
@@ -238,6 +246,9 @@ export default function SettingsPage() {
                 </button>
               )}
             </div>
+            {pushDebug && (
+              <p className="text-[10px] text-hub-text-muted/40 mt-2 font-mono break-all">{pushDebug}</p>
+            )}
           </div>
         </section>
 

@@ -11,6 +11,7 @@ interface ActivityItemProps {
   message: UiMessage;
   onViewPlan?: (planPath: string) => void;
   onSendResponse?: (response: string) => void;
+  recentPlanPath?: string | null;
 }
 
 type ActivityType =
@@ -304,9 +305,14 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
   };
 }
 
-export function ActivityItem({ message, onViewPlan, onSendResponse }: ActivityItemProps) {
+export function ActivityItem({ message, onViewPlan, onSendResponse, recentPlanPath }: ActivityItemProps) {
   const [expanded, setExpanded] = useState(false);
+  // For multi-select questions: tracks "qIdx-optIdx" keys
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
+  // For single-select questions: tracks qIdx -> optIdx (or "custom" for custom input)
+  const [singleSelections, setSingleSelections] = useState<Map<number, number | "custom">>(new Map());
+  // Custom input for "Other..." per question
+  const [customInputs, setCustomInputs] = useState<Map<number, string>>(new Map());
   const [customInput, setCustomInput] = useState("");
   const [responded, setResponded] = useState(false);
 
@@ -397,6 +403,16 @@ export function ActivityItem({ message, onViewPlan, onSendResponse }: ActivityIt
             Claude has prepared a plan. What would you like to do?
           </p>
           <div className="flex gap-2 flex-wrap">
+            {/* View Plan button - shown when we have a recent plan path */}
+            {recentPlanPath && onViewPlan && (
+              <button
+                type="button"
+                onClick={() => onViewPlan(recentPlanPath)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 active:scale-95 transition-all"
+              >
+                View Plan
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -444,82 +460,144 @@ export function ActivityItem({ message, onViewPlan, onSendResponse }: ActivityIt
 
         if (!questions || questions.length === 0) return null;
 
+        // Check if all questions have been answered
+        const allAnswered = questions.every((q, qIdx) => {
+          if (q.multiSelect) {
+            // For multi-select, check if at least one option is selected for this question
+            return Array.from(selectedOptions).some(key => key.startsWith(`${qIdx}-`));
+          } else {
+            // For single-select, check if this question has a selection
+            return singleSelections.has(qIdx);
+          }
+        });
+
+        // Build the response when submitting
+        const buildResponse = () => {
+          const answers: Record<string, string> = {};
+          questions.forEach((q, qIdx) => {
+            const key = q.header || `question_${qIdx + 1}`;
+            if (q.multiSelect) {
+              const selectedLabels = Array.from(selectedOptions)
+                .filter(optKey => optKey.startsWith(`${qIdx}-`))
+                .map(optKey => {
+                  const optIdx = parseInt(optKey.split("-")[1]);
+                  return q.options?.[optIdx]?.label || `Option ${optIdx + 1}`;
+                });
+              answers[key] = selectedLabels.join(", ");
+            } else {
+              const selection = singleSelections.get(qIdx);
+              if (selection === "custom") {
+                answers[key] = customInputs.get(qIdx) || "";
+              } else if (typeof selection === "number") {
+                answers[key] = q.options?.[selection]?.label || `Option ${selection + 1}`;
+              }
+            }
+          });
+          return JSON.stringify({ answers });
+        };
+
         return (
-          <div className="mt-2 ml-9 mr-2 flex flex-col gap-3">
-            {questions.map((q, qIdx) => (
-              <div key={qIdx} className="flex flex-col gap-2">
-                <p className="text-xs text-hub-text font-medium">
-                  {q.question || q.header || "Choose an option:"}
-                </p>
-                <div className="flex gap-2 flex-wrap">
-                  {q.options?.map((opt, optIdx) => {
-                    const optKey = `${qIdx}-${optIdx}`;
-                    const isSelected = selectedOptions.has(optKey);
-                    return (
-                      <button
-                        key={optIdx}
-                        type="button"
-                        onClick={() => {
-                          if (q.multiSelect) {
-                            const newSelected = new Set(selectedOptions);
-                            if (isSelected) {
-                              newSelected.delete(optKey);
+          <div className="mt-2 ml-9 mr-2 flex flex-col gap-4">
+            {questions.map((q, qIdx) => {
+              const isMultiSelect = q.multiSelect;
+              const currentSelection = singleSelections.get(qIdx);
+              const hasCustomInput = currentSelection === "custom";
+
+              return (
+                <div key={qIdx} className="flex flex-col gap-2">
+                  <p className="text-xs text-hub-text font-medium">
+                    {q.question || q.header || "Choose an option:"}
+                  </p>
+                  <div className="flex gap-2 flex-wrap">
+                    {q.options?.map((opt, optIdx) => {
+                      const optKey = `${qIdx}-${optIdx}`;
+                      const isSelected = isMultiSelect
+                        ? selectedOptions.has(optKey)
+                        : currentSelection === optIdx;
+                      return (
+                        <button
+                          key={optIdx}
+                          type="button"
+                          onClick={() => {
+                            if (isMultiSelect) {
+                              const newSelected = new Set(selectedOptions);
+                              if (isSelected) {
+                                newSelected.delete(optKey);
+                              } else {
+                                newSelected.add(optKey);
+                              }
+                              setSelectedOptions(newSelected);
                             } else {
-                              newSelected.add(optKey);
+                              // Single select - just track selection, don't submit yet
+                              const newSelections = new Map(singleSelections);
+                              if (currentSelection === optIdx) {
+                                // Deselect if clicking the same option
+                                newSelections.delete(qIdx);
+                              } else {
+                                newSelections.set(qIdx, optIdx);
+                              }
+                              setSingleSelections(newSelections);
                             }
-                            setSelectedOptions(newSelected);
-                          } else {
-                            // Single select - respond immediately
-                            setResponded(true);
-                            onSendResponse(opt.label || `Option ${optIdx + 1}`);
-                          }
-                        }}
-                        title={opt.description}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
-                          isSelected
-                            ? "bg-hub-accent text-white border border-hub-accent"
-                            : "bg-hub-surface-2 text-hub-text border border-hub-border hover:bg-hub-border"
-                        }`}
-                      >
-                        {opt.label || `Option ${optIdx + 1}`}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const customResponse = prompt("Enter your response:");
-                      if (customResponse) {
-                        setResponded(true);
-                        onSendResponse(customResponse);
-                      }
-                    }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-hub-surface-2 text-hub-text-muted border border-hub-border hover:bg-hub-border transition-all active:scale-95"
-                  >
-                    Other...
-                  </button>
+                          }}
+                          title={opt.description}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
+                            isSelected
+                              ? "bg-hub-accent text-white border border-hub-accent"
+                              : "bg-hub-surface-2 text-hub-text border border-hub-border hover:bg-hub-border"
+                          }`}
+                        >
+                          {opt.label || `Option ${optIdx + 1}`}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newSelections = new Map(singleSelections);
+                        newSelections.set(qIdx, "custom");
+                        setSingleSelections(newSelections);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all active:scale-95 ${
+                        hasCustomInput
+                          ? "bg-hub-accent text-white border border-hub-accent"
+                          : "bg-hub-surface-2 text-hub-text-muted border border-hub-border hover:bg-hub-border"
+                      }`}
+                    >
+                      Other...
+                    </button>
+                  </div>
+                  {/* Custom input field when "Other" is selected */}
+                  {hasCustomInput && (
+                    <input
+                      type="text"
+                      placeholder="Enter your response..."
+                      value={customInputs.get(qIdx) || ""}
+                      onChange={(e) => {
+                        const newInputs = new Map(customInputs);
+                        newInputs.set(qIdx, e.target.value);
+                        setCustomInputs(newInputs);
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs bg-hub-surface-2 text-hub-text border border-hub-border focus:border-hub-accent focus:outline-none"
+                      autoFocus
+                    />
+                  )}
                 </div>
-                {/* Multi-select submit button */}
-                {q.multiSelect && selectedOptions.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const selectedLabels = Array.from(selectedOptions)
-                        .filter(key => key.startsWith(`${qIdx}-`))
-                        .map(key => {
-                          const optIdx = parseInt(key.split("-")[1]);
-                          return q.options?.[optIdx]?.label || `Option ${optIdx + 1}`;
-                        });
-                      setResponded(true);
-                      onSendResponse(selectedLabels.join(", "));
-                    }}
-                    className="self-start px-3 py-1.5 rounded-lg text-xs font-medium bg-hub-accent text-white hover:bg-hub-accent-hover active:scale-95 transition-all"
-                  >
-                    Submit Selection
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
+
+            {/* Submit button - appears when all questions are answered */}
+            {allAnswered && (
+              <button
+                type="button"
+                onClick={() => {
+                  setResponded(true);
+                  onSendResponse(buildResponse());
+                }}
+                className="self-start px-4 py-2 rounded-lg text-sm font-medium bg-hub-accent text-white hover:bg-hub-accent-hover active:scale-95 transition-all"
+              >
+                Submit {questions.length > 1 ? "Answers" : "Answer"}
+              </button>
+            )}
           </div>
         );
       })()}

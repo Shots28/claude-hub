@@ -281,7 +281,7 @@ export function InstanceSidebar({
                           e.stopPropagation();
                           setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
                         }}
-                        className="absolute right-2 top-2.5 w-6 h-6 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
+                        className="absolute right-2 top-2.5 w-6 h-6 flex items-center justify-center rounded-md opacity-50 hover:opacity-100 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
                         aria-label="Instance options"
                       >
                         <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">

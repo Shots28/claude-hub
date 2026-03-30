@@ -248,12 +248,35 @@ async function initBridge(
   });
 
   // --- Build local instance ownership cache ---
-  const localRepoPaths = new Set(folders.map((f) => f.path));
+  // localRepoPaths is refreshed when discovered_repos changes (e.g., user triggers a rescan)
+  let localRepoPaths = new Set(folders.map((f) => f.path));
   const localInstanceIds = new Set<string>();
 
   let refreshTimer: NodeJS.Timeout | null = null;
 
+  // Refresh localRepoPaths from the discovered_repos table
+  async function refreshLocalRepoPaths() {
+    try {
+      const { data: repos } = await bridgeSupabase
+        .from("discovered_repos")
+        .select("path");
+      if (repos) {
+        const newPaths = new Set<string>(repos.map((r: { path: string }) => r.path));
+        const added = [...newPaths].filter(p => !localRepoPaths.has(p));
+        if (added.length > 0) {
+          console.log(`[bridge] Discovered ${added.length} new repo paths`);
+        }
+        localRepoPaths = newPaths;
+      }
+    } catch (err) {
+      console.error("[bridge] Failed to refresh repo paths:", err);
+    }
+  }
+
   async function refreshLocalInstanceCache() {
+    // Also refresh repo paths to pick up any newly discovered repos
+    await refreshLocalRepoPaths();
+
     const { data: instances } = await bridgeSupabase
       .from("instances")
       .select("id, repo_path");
@@ -300,6 +323,19 @@ async function initBridge(
         console.log(`[bridge] User interrupted instance ${id}, aborting...`);
         await manager.interrupt(id);
       }
+    })
+    .subscribe();
+
+  // Refresh local repo paths when discovered_repos changes (e.g., user triggers rescan)
+  bridgeSupabase
+    .channel("bridge-discovered-repos")
+    .on("postgres_changes", {
+      event: "*",
+      schema: "public",
+      table: "discovered_repos",
+    }, () => {
+      console.log("[bridge] discovered_repos changed, refreshing cache...");
+      debouncedRefresh();
     })
     .subscribe();
 

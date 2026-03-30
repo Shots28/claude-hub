@@ -117,8 +117,19 @@ export function MessageList({
   const elements: React.ReactNode[] = [];
   let lastDateKey = "";
   let prevMessage: UiMessage | null = null;
+  let recentPlanPath: string | null = null; // Track most recent plan file written
 
   for (const msg of messages) {
+    // Track plan file writes so we can show "View Plan" on ExitPlanMode
+    if (msg.tool_name === "Write") {
+      try {
+        const input = JSON.parse(msg.content || "{}");
+        const filePath = input.file_path || "";
+        if (/\.claude\/plans\/.*\.md$/.test(filePath)) {
+          recentPlanPath = filePath;
+        }
+      } catch {}
+    }
     const dateKey = getDateKey(msg.created_at);
     if (dateKey !== lastDateKey) {
       elements.push(
@@ -153,6 +164,7 @@ export function MessageList({
         onRetry={onRetryMessage}
         onViewPlan={onViewPlan}
         onSendResponse={onSendResponse}
+        recentPlanPath={msg.tool_name === "ExitPlanMode" ? recentPlanPath : null}
       />
     );
 

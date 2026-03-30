@@ -397,78 +397,80 @@ export function InstanceListMobile({
                       data-instance-id={inst.id}
                       className={`relative mx-2 mb-0.5 ${isDragging ? "opacity-50 scale-95" : ""} transition-all`}
                     >
-                      <Link
-                        href={editMode ? "#" : `/instances/${inst.id}`}
-                        onClick={(e) => {
-                          if (editMode) {
-                            e.preventDefault();
-                            return;
-                          }
-                          onClose();
-                        }}
-                        className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-colors ${
-                          isActive
-                            ? "bg-hub-accent/10"
-                            : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
-                        } ${editMode ? "cursor-default" : ""}`}
-                      >
-                        {/* Drag handle in edit mode */}
-                        {editMode && (
-                          <DragHandle onDragStart={handleDragStart(inst.id)} />
-                        )}
-                        <StatusBadge
-                          status={inst.status as InstanceStatus}
-                          size="md"
-                        />
-                        <div className="min-w-0 flex-1">
-                          {renamingId === inst.id ? (
-                            <input
-                              type="text"
-                              value={renameValue}
-                              onChange={(e) => setRenameValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  submitRename(inst.id);
-                                } else if (e.key === "Escape") {
-                                  cancelRename();
-                                }
-                              }}
-                              onBlur={() => submitRename(inst.id)}
-                              onClick={(e) => e.preventDefault()}
-                              autoFocus
-                              className="text-sm font-medium truncate w-full bg-hub-surface-2 border border-hub-accent/50 rounded px-1.5 py-0.5 text-hub-text focus:outline-none focus:ring-1 focus:ring-hub-accent/50"
-                            />
-                          ) : (
-                            <div
-                              className={`text-sm font-medium truncate ${
-                                isActive
-                                  ? "text-hub-text"
-                                  : "text-hub-text-muted"
-                              }`}
-                            >
-                              {inst.name}
-                            </div>
+                      <div className="flex items-center">
+                        <Link
+                          href={editMode ? "#" : `/instances/${inst.id}`}
+                          onClick={(e) => {
+                            if (editMode) {
+                              e.preventDefault();
+                              return;
+                            }
+                            onClose();
+                          }}
+                          className={`flex-1 flex items-center gap-3 rounded-l-xl px-4 py-3 transition-colors ${
+                            isActive
+                              ? "bg-hub-accent/10"
+                              : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
+                          } ${editMode ? "cursor-default" : ""}`}
+                        >
+                          {/* Drag handle in edit mode */}
+                          {editMode && (
+                            <DragHandle onDragStart={handleDragStart(inst.id)} />
                           )}
-                          {inst.last_message_preview && (
-                            <p className="text-xs text-hub-text-muted/60 truncate mt-0.5">
-                              {inst.last_message_preview}
-                            </p>
+                          <StatusBadge
+                            status={inst.status as InstanceStatus}
+                            size="md"
+                          />
+                          <div className="min-w-0 flex-1">
+                            {renamingId === inst.id ? (
+                              <input
+                                type="text"
+                                value={renameValue}
+                                onChange={(e) => setRenameValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    submitRename(inst.id);
+                                  } else if (e.key === "Escape") {
+                                    cancelRename();
+                                  }
+                                }}
+                                onBlur={() => submitRename(inst.id)}
+                                onClick={(e) => e.preventDefault()}
+                                autoFocus
+                                className="text-sm font-medium truncate w-full bg-hub-surface-2 border border-hub-accent/50 rounded px-1.5 py-0.5 text-hub-text focus:outline-none focus:ring-1 focus:ring-hub-accent/50"
+                              />
+                            ) : (
+                              <div
+                                className={`text-sm font-medium truncate ${
+                                  isActive
+                                    ? "text-hub-text"
+                                    : "text-hub-text-muted"
+                                }`}
+                              >
+                                {inst.name}
+                              </div>
+                            )}
+                            {inst.last_message_preview && (
+                              <p className="text-xs text-hub-text-muted/60 truncate mt-0.5">
+                                {inst.last_message_preview}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Attention indicator */}
+                          {needsAttention[inst.id] && (
+                            <span className={`flex-shrink-0 h-5 flex items-center justify-center rounded-full text-[10px] font-medium text-white px-2 ${
+                              needsAttention[inst.id] === "permission"
+                                ? "bg-orange-500"
+                                : "bg-emerald-500"
+                            }`}>
+                              {needsAttention[inst.id] === "permission" ? "Action" : "Done"}
+                            </span>
                           )}
-                        </div>
+                        </Link>
 
-                        {/* Attention indicator */}
-                        {needsAttention[inst.id] && (
-                          <span className={`flex-shrink-0 h-5 flex items-center justify-center rounded-full text-[10px] font-medium text-white px-2 ${
-                            needsAttention[inst.id] === "permission"
-                              ? "bg-orange-500"
-                              : "bg-emerald-500"
-                          }`}>
-                            {needsAttention[inst.id] === "permission" ? "Action" : "Done"}
-                          </span>
-                        )}
-
-                        {/* More actions button */}
+                        {/* More actions button - OUTSIDE Link to prevent navigation on tap */}
                         <button
                           ref={(el) => { menuTriggerRefs.current.set(inst.id, el); }}
                           type="button"
@@ -477,16 +479,20 @@ export function InstanceListMobile({
                             e.stopPropagation();
                             setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
                           }}
-                          className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all focus:outline-none"
+                          className={`flex-shrink-0 w-10 h-full flex items-center justify-center rounded-r-xl transition-all ${
+                            isActive
+                              ? "bg-hub-accent/10 hover:bg-hub-accent/20"
+                              : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
+                          }`}
                           aria-label="Instance options"
                         >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-4 h-4 text-hub-text-muted" fill="currentColor" viewBox="0 0 24 24">
                             <circle cx="12" cy="5" r="2" />
                             <circle cx="12" cy="12" r="2" />
                             <circle cx="12" cy="19" r="2" />
                           </svg>
                         </button>
-                      </Link>
+                      </div>
 
                       {menuOpenId === inst.id && (
                         <MobileActionMenu

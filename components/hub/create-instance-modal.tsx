@@ -46,11 +46,18 @@ export function CreateInstanceModal({
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [createFolderError, setCreateFolderError] = useState<string | null>(null);
 
-  // Function to fetch folders
+  // Function to fetch folders (triggers a fresh scan first)
   const fetchFolders = useCallback(async () => {
     setFoldersLoading(true);
     setFoldersError(null);
     try {
+      // Trigger a fresh scan of local folders
+      await fetch("/api/repos/discover", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      // Then fetch the updated list
       const res = await fetch("/api/repos/discover", {
         credentials: "include",
       });

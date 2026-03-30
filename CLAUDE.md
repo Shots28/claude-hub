@@ -300,3 +300,143 @@ Page refresh:
 - Health metrics on Vercel show serverless stats, not bridge stats
 - No code diff viewer — assistant responses are plain text/markdown
 - Tool outputs (command results, file contents) are not directly displayed — Claude's SDK processes them internally and the results appear in Claude's subsequent text responses
+
+---
+
+## Operational Workflow (CRITICAL)
+
+### Working with the Deployed Version
+
+**Important**: Users typically access Claude Hub via the **deployed Vercel version**, not a local development server. This means:
+
+1. **All code changes must be pushed to GitHub** for users to see them
+2. **Vercel auto-deploys** from the `main` branch (usually takes 30-60 seconds)
+3. **TypeScript errors will block deployment** — always run `npx tsc --noEmit` before pushing
+4. **Browser cache** may show old UI — users should hard refresh (Cmd+Shift+R / Ctrl+Shift+R)
+
+### Deployment Checklist
+
+```bash
+# 1. Check for TypeScript errors FIRST
+npx tsc --noEmit
+
+# 2. If errors, fix them before proceeding
+
+# 3. Commit and push
+git add -A && git commit -m "Your message" && git push origin main
+
+# 4. Monitor deployment
+npx vercel ls 2>&1 | head -5
+# Look for "● Ready" status on latest deployment
+
+# 5. If deployment fails, check logs
+npx vercel inspect <deployment-url>
+```
+
+### Restarting the Bridge Server
+
+The bridge server runs locally and must be restarted carefully to avoid disconnecting the phone app:
+
+```bash
+# Kill existing processes cleanly
+pkill -f "node server.ts" 2>/dev/null
+lsof -ti:3100 | xargs kill -9 2>/dev/null
+lsof -ti:3000 | xargs kill -9 2>/dev/null
+sleep 2
+
+# Start fresh (in background so it persists)
+set -a && source .env.local && set +a && nohup node server.ts > /tmp/claude-hub-bridge.log 2>&1 &
+
+# Verify it started
+sleep 8 && tail -20 /tmp/claude-hub-bridge.log
+```
+
+**Critical**: If bridge doesn't restart properly, the phone app will be disconnected. Always verify the bridge is running after restart.
+
+---
+
+## Lessons Learned
+
+### Why Chat Persistence Breaks
+
+1. **TypeScript errors block Vercel deployment**
+   - Most common cause: Changes made locally but Vercel build fails silently
+   - Always run `npx tsc --noEmit` before pushing
+   - Check `npx vercel ls` to verify deployment status is "Ready"
+
+2. **Database schema mismatches**
+   - New required fields added to tables break INSERT operations
+   - Example: `chat_messages` requires `tool_name` and `tool_id` fields (can be null)
+   - Fix: Update INSERT statements to include all required fields
+
+3. **Wrong instance/session IDs**
+   - Messages tied to `instance_id` — if instance deleted, messages cascade-delete
+   - Session resume requires valid `current_session_id` on instance
+
+4. **Bridge not running**
+   - Messages get "queued" but never processed
+   - Instance stays in "queued" status indefinitely
+   - Bridge heartbeat table shows offline status
+
+5. **Duplicate bridge processes**
+   - Two bridges running cause race conditions and message drops
+   - Always kill all existing processes before starting new bridge
+
+### UI Issues and Fixes (2024-03-29)
+
+1. **3-dots menu invisible on desktop**
+   - Root cause: `opacity-0 group-hover:opacity-100` doesn't work on touch devices
+   - Fix: Changed to `opacity-50 hover:opacity-100` (always visible, brighter on hover)
+
+2. **3-dots menu on mobile triggers navigation instead of opening menu**
+   - Root cause: Button was nested INSIDE `<Link>` component
+   - Fix: Restructured layout to put button OUTSIDE Link in a flex container
+
+3. **Multi-question forms submit on first click**
+   - Root cause: Single-select options immediately called `onSendResponse()`
+   - Fix: Track selections in state (`singleSelections` Map), show Submit button only when all questions answered
+
+4. **Plan viewer not showing "View Plan" button**
+   - Root cause: ExitPlanMode doesn't include plan path; UI must detect it from prior Write messages
+   - Fix: MessageList tracks recent `.claude/plans/*.md` writes and passes path to ExitPlanMode activity item
+
+5. **New instances don't show recently cloned repos**
+   - Root cause: Bridge scans folders only on startup, not when creating new instance
+   - Fix: Added POST `/api/repos/discover` endpoint that triggers fresh scan; called when opening Create Instance modal
+
+### Bridge Cache Refresh
+
+The bridge maintains two caches:
+- `localRepoPaths` — Set of folder paths it manages
+- `localInstanceIds` — Set of instance IDs for those repos
+
+**Problem**: If a new repo is added after bridge starts, it won't process messages for instances in that repo.
+
+**Solution**: Bridge now listens to `discovered_repos` table changes via Realtime and refreshes its caches:
+```typescript
+bridgeSupabase
+  .channel("bridge-discovered-repos")
+  .on("postgres_changes", { event: "*", schema: "public", table: "discovered_repos" }, () => {
+    debouncedRefresh(); // Refreshes both caches
+  })
+  .subscribe();
+```
+
+### Stuck Instances
+
+Instances can get stuck in "running" or "queued" status:
+
+1. **Running but not processing** — Bridge crashed mid-execution
+   - Fix: Reset to "idle" via direct Supabase update, or restart bridge (auto-resets stale instances)
+
+2. **Queued but not picked up** — Instance's `repo_path` not in bridge's `localRepoPaths`
+   - Fix: Trigger folder rescan (POST `/api/repos/discover`), restart bridge, or manually add to `discovered_repos`
+
+3. **Multiple bridges running** — Race condition causes neither to process correctly
+   - Fix: Kill all bridge processes, start single instance
+
+### Debug Endpoints
+
+- `GET /api/health/db` — Database connection status, message counts, insert/select test
+- `GET /api/bridge/status` — Bridge heartbeat (online/offline, last seen)
+- `GET /api/instances/[id]/messages?_debug=true` — Returns debug info with messages

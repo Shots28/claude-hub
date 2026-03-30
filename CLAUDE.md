@@ -427,6 +427,35 @@ If polling runs before the API response replaces the optimistic message, it adds
 
 **Prevention**: Any new API-fetching callback in `use-realtime.ts` must handle non-ok responses explicitly. Never silently swallow errors for data that drives the main UI.
 
+### Attention Badge Never Clears (2025-03-30)
+
+**Symptoms**: "Done" badge on completed chats persists after tapping/viewing them. Counter says "4 need attention" but clicking one doesn't reduce it. Badge reappears on page refresh.
+
+**Root causes**:
+1. **`updated_at` drift invalidated seen markers**: Old code stored `inst.updated_at` timestamps in localStorage as "seen" keys. Any instance update (name change, status flip, bridge heartbeat) changed `updated_at`, so the stored timestamp no longer matched — badge reappeared.
+2. **`markSeen` never called on mobile**: Tapping a chat in the mobile list navigated to `/instances/[id]` via `<Link>`, unmounting the chats page. `markSeen()` was never invoked. The layout hook's auto-clear effect should have handled it, but was unreliable due to bug #1.
+3. **`markSeen` not destructured in chats page**: The return value was available from the hook but wasn't destructured.
+
+**Fix**:
+1. Replaced per-instance `Set<updated_at_timestamp>` with a single `Record<instanceId, dismissedAt>` map in localStorage (key: `hub_dismissed_completions`). A completion is dismissed if `dismissedAt >= new Date(updated_at).getTime()`. This survives `updated_at` drift because the dismiss timestamp is independent.
+2. Added `onClick` handler on mobile chat `<Link>` and desktop `handleSelectInstance` to call `markSeen(inst.id)`.
+3. Destructured `markSeen` from `useNeedsAttention` in chats page.
+
+**Lesson**: Never key dismissal state on volatile database timestamps. Use the user's action timestamp compared against the data timestamp instead.
+
+### Duplicate Messages from Phone Retry (2025-03-30)
+
+**Symptoms**: User sends a message, phone shows "sending..." for too long, then two identical user messages appear with two responses.
+
+**Root cause**: Phone's `sendMessage()` had a 10-second fetch timeout. On Vercel cold starts or slow auto-naming queries, the POST would succeed server-side (message inserted) but the response didn't reach the phone before timeout. Phone retried — second insert — bridge processed both.
+
+**Fix** (three layers):
+1. **Server-side idempotency** (`messages/route.ts`): Before inserting, checks for duplicate user messages with identical `content` + `instance_id` within a 30-second window. Returns the existing message if found (`deduplicated: true`).
+2. **Smarter retry logic** (`use-realtime.ts`): Timeout (now 30s) is treated as "server likely received it" — starts polling instead of retrying. Only 500 errors and pre-connect network failures are retried. 4xx errors fail immediately.
+3. **Bridge-side dedup eviction** (`server.ts`): `processedMessageIds` changed from `Set` (cleared every 5 min) to `Map<id, timestamp>` (entries evicted after 10 min, checked every 1 min). Eliminates the dedup gap window that existed when the entire Set was cleared.
+
+**Lesson**: Idempotency must be enforced at the server level — client-side retry logic alone can't prevent duplicates when the failure mode is "request succeeded but response lost."
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)

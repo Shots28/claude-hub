@@ -479,6 +479,30 @@ Instances can get stuck in "running" or "queued" status:
    - Bridge now checks both locations: first repo, then `~/.claude/plans/`
    - This allows viewing plans that Claude created in any repo
 
+### Session Sync (IDE ↔ Hub)
+
+Claude Hub can sync with Claude Code IDE (VS Code, CLI) sessions:
+
+**How it works:**
+1. Claude stores sessions in `~/.claude/projects/{project-key}/{session-id}.jsonl`
+2. Project key = repo path with `/` → `-` (e.g., `/Users/foo/repo` → `-Users-foo-repo`)
+3. Session files contain conversation history in JSONL format
+
+**API Endpoints:**
+- `GET /api/instances/[id]/sessions/local` — Lists local IDE sessions for the repo
+- `POST /api/instances/[id]/sessions/switch` — Switch to a different session (imports messages)
+
+**UI Flow:**
+1. Tap "Sync" button in chat header
+2. See list of IDE sessions with preview and timestamp
+3. Tap a session to switch and import its history
+4. Continue the conversation from your phone
+
+**Limitations:**
+- Session files must exist on the machine running the bridge
+- Switching sessions replaces the current chat history in Supabase
+- Tool outputs (file contents, command results) are not imported
+
 ### Debug Endpoints
 
 - `GET /api/health/db` — Database connection status, message counts, insert/select test

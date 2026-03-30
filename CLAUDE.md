@@ -96,6 +96,9 @@ app/
       cleanup/route.ts            # POST: cleanup stale instances
     permissions/
       [id]/resolve/route.ts       # POST: approve/deny permission request
+    sessions/
+      all/route.ts                # GET: list all local IDE sessions across repos
+      import/route.ts             # POST: import desktop session (create/find instance)
     repos/discover/route.ts       # GET: list discovered local repos
     bridge/status/route.ts        # GET: check bridge heartbeat
     health/route.ts               # GET: health check + memory stats (no auth)
@@ -106,7 +109,6 @@ lib/
   auth.ts                         # JWT signing/verify (jose), bcrypt password hashing, cookie helpers
   supabase.ts                     # Server (service_role) + browser (anon) Supabase client init
   types.ts                        # All TypeScript types + Database interface for Supabase
-  event-normalizer.ts             # Maps SDK stream events to ServerMessage union types
   logger.ts                       # JSON structured logger → data/events.log (auto-rotate at 10MB)
   semaphore.ts                    # Async concurrency limiter (FIFO queue)
   use-realtime.ts                 # React hook: Supabase Realtime subscriptions + 1s polling fallback
@@ -161,8 +163,9 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 | `discovered_repos` | Auto-discovered local repos (name, path) — synced by bridge on startup |
 | `bridge_status` | Single-row heartbeat table (id="default", last_heartbeat_at, status) |
 | `push_subscriptions` | Web Push notification subscriptions (endpoint, VAPID keys) |
+| `local_sessions` | Desktop IDE session metadata — synced by bridge every 5 min for phone display |
 
-**Realtime-enabled tables:** `chat_messages`, `instances`, `permission_requests`
+**Realtime-enabled tables:** `chat_messages`, `instances`, `permission_requests`, `local_sessions`
 - These tables have `REPLICA IDENTITY FULL` (required for Realtime UPDATE events)
 - Realtime must be explicitly enabled per table in Supabase dashboard
 
@@ -574,22 +577,51 @@ Claude Hub can sync with Claude Code IDE (VS Code, CLI) sessions:
 **How it works:**
 1. Claude stores sessions in `~/.claude/projects/{project-key}/{session-id}.jsonl`
 2. Project key = repo path with `/` → `-` (e.g., `/Users/foo/repo` → `-Users-foo-repo`)
-3. Session files contain conversation history in JSONL format
+3. Bridge scans these files and syncs session metadata to `local_sessions` Supabase table every 5 minutes
+4. Session previews are extracted from the first user message, with IDE/system tags stripped
+5. Live sync: bridge polls active session JSONL files every 10s, appends new messages to `chat_messages`
+
+**Path resolution (`resolveProjectPath` in `server.ts`):**
+Converting project keys back to paths is ambiguous when directory names contain dashes (e.g., `claude-hub` vs `claude/hub`). The `resolveProjectPath()` function walks the filesystem trying longest-match-first: for each group of dash-separated parts, it tries combining them into a single directory name (longest first), falling back to treating the dash as a path separator. This correctly resolves `-Users-agents-claude-hub` → `/Users/agents/claude-hub`.
 
 **API Endpoints:**
-- `GET /api/instances/[id]/sessions/local` — Lists local IDE sessions for the repo
+- `GET /api/sessions/all` — Lists ALL local IDE sessions across all repos (from `local_sessions` table)
+- `POST /api/sessions/import` — Creates/finds instance for a repo, sets session ID (triggers bridge import)
+- `GET /api/instances/[id]/sessions/local` — Lists local IDE sessions for a specific repo
 - `POST /api/instances/[id]/sessions/switch` — Switch to a different session (imports messages)
 
-**UI Flow:**
-1. Tap "Sync" button in chat header
-2. See list of IDE sessions with preview and timestamp
-3. Tap a session to switch and import its history
+**UI Flow (Global — from Chats page):**
+1. Tap "Desktop" button on the Chats page header
+2. GlobalSessionPicker modal shows all IDE sessions grouped by repo
+3. Tap a session → import endpoint creates/finds instance, sets session → `refreshInstances()` → navigate to instance
 4. Continue the conversation from your phone
+
+**UI Flow (Per-instance — from Chat header):**
+1. Tap "Sync" button in chat header
+2. See list of IDE sessions for that specific repo
+3. Tap a session to switch and import its history
+
+**Session preview extraction** (`server.ts` `extractCleanPreview()`):
+- Strips XML-like tags and their content (e.g., `<ide_selection>...`, `<system-reminder>...`)
+- Strips self-closing/orphaned tags, collapses whitespace
+- Returns first 100 chars of cleaned text
+- Without this, previews show raw IDE context like "ide open file: the user opened the file..."
+
+**Instance page race condition** (`app/(hub)/instances/[id]/page.tsx`):
+- After importing a session, `router.push(/instances/{id})` navigates before `useHubRealtime()` has fetched the new instance
+- Fix: Instance page calls `refreshInstances()` on mount if instance not found, shows spinner while loading
+- GlobalSessionPicker also calls `await refreshInstances()` before navigating
+
+**Import route gotchas** (`app/api/sessions/import/route.ts`):
+- `instances` table has `id TEXT PRIMARY KEY` with no default — must provide `randomUUID()`
+- `maybeSingle()` errors if multiple instances exist for the same repo — use `.limit(1)` instead
+- Must include `allowed_tools: []` in insert (required field)
 
 **Limitations:**
 - Session files must exist on the machine running the bridge
 - Switching sessions replaces the current chat history in Supabase
 - Tool outputs (file contents, command results) are not imported
+- Bridge restart needed after code changes to `server.ts` for preview cleanup to take effect
 
 **Deduplication (critical for preventing double messages):**
 
@@ -598,9 +630,10 @@ The live session sync polls JSONL files every 10 seconds and inserts new message
 2. Session sync sees new JSONL entries → re-imports them → duplicate messages
 3. Realtime fires for the duplicates → bridge processes again → duplicate responses
 
-Three mechanisms prevent this:
-- **`sessionMessageCounts`** — Tracks the JSONL text message count per instance. Updated after every `sendMessage()` call and initialized by reading actual JSONL files (not DB rows, which include tool messages and diverge from JSONL counts).
-- **`instanceLocks`** — Session sync acquires the instance lock before inserting, preventing the Realtime handler from racing (the INSERT triggers a Realtime event that could arrive before `processedMessageIds` is updated).
+Four mechanisms prevent this:
+- **`sessionMessageCounts`** — Tracks the JSONL text message count per instance. Updated after every `sendMessage()` call (before releasing instance lock) and initialized by reading actual JSONL files (not DB rows, which include tool messages and diverge from JSONL counts).
+- **Content-based dedup** — Before inserting, sync checks existing `chat_messages` content to skip messages that already exist in the DB. Catches edge cases where count-based dedup fails due to race conditions.
+- **`instanceLocks`** — Session sync acquires the instance lock before inserting, preventing the Realtime handler from racing (the INSERT triggers a Realtime event that could arrive before `processedMessageIds` is updated). Lock is released AFTER updating `sessionMessageCounts` to close the race window.
 - **`processedMessageIds`** — All inserted user message IDs are added to this set so the Realtime handler skips them.
 
 ### Debug Endpoints

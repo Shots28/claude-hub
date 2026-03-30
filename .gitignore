@@ -10,8 +10,6 @@ out/
 next-env.d.ts
 
 # Environment
-.env
-.env.local
 .env*.local
 
 # Claude Hub data (runtime, not source)
@@ -34,3 +32,4 @@ Thumbs.db
 *.swo
 .vercel
 supabase/.temp/
+config.bat

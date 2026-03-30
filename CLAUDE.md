@@ -479,6 +479,26 @@ If polling runs before the API response replaces the optimistic message, it adds
 
 **Lesson**: Client-side UI guards (disabling buttons) are the first line of defense against double-tap. Server-side SELECT-before-INSERT is not atomic — it cannot prevent concurrent duplicate inserts without database-level constraints (unique index or advisory locks).
 
+### Duplicate Messages from Session Import During Execution (2025-03-30)
+
+**Symptoms**: User sends one message from phone, two messages appear with two different Claude responses. Bridge logs show: `Executing message → Importing session → Imported 2 messages → Executing message` (second execution with a different message ID).
+
+**Root cause**: When the SDK processes a message and starts a new session, it emits a `session_id` event. `instance-manager.ts` (line 574-578) updates `current_session_id` in the `instances` table. This triggers the Realtime subscription for instance changes in `server.ts`, which detects the session_id change and calls `importSessionMessages()`. That function deletes ALL existing `chat_messages` for the instance and re-imports them from the JSONL file. The JSONL now contains the user message that was just sent (written by the SDK), so it gets re-inserted as a NEW row with a different ID. The INSERT triggers a Realtime event, and the bridge executes the "new" message again.
+
+**Timeline**:
+1. Phone sends "hello" → API inserts msg A → Realtime fires → bridge executes (acquires lock)
+2. SDK starts new session → emits session_id → instance-manager updates `current_session_id`
+3. Instance Realtime fires (session_id changed) → `importSessionMessages()` called
+4. Import deletes all messages, reads JSONL, inserts "hello" as msg B (different ID)
+5. Realtime fires for msg B INSERT → bridge executes "hello" again
+
+**Fix** (three layers):
+1. **Skip import during active execution** (`server.ts`): Before calling `importSessionMessages()`, check `instanceLocks.has(id) || manager.isRunning(id)`. If true, the session_id change came from the bridge's own SDK execution, not a user importing a desktop session — skip the import.
+2. **Mark imported IDs as processed** (`server.ts`): `importSessionMessages()` now uses `.select("id, role")` on insert and adds all user message IDs to `processedMessageIds`, so the Realtime handler skips them even if import runs.
+3. **Update session sync counts after import**: Sets `sessionMessageCounts` after import to prevent the live session sync from re-importing the same messages.
+
+**Lesson**: Any Realtime subscription that triggers on instance changes must check whether the change originated from the bridge's own execution. The session_id update from the SDK is indistinguishable from a user-initiated session import without checking the instance lock state.
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)

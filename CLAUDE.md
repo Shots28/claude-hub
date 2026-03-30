@@ -129,6 +129,7 @@ components/
     status-badge.tsx              # Instance status indicator (idle/running/error/etc.)
     streaming-text.tsx            # Animated text rendering for streaming responses
     resource-monitor.tsx          # System memory/CPU metrics display
+    connection-status.tsx         # Unified connectivity banner (offline/bridge/realtime)
   ui/                             # Base UI components
 
 supabase/
@@ -149,7 +150,7 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 | Table | Purpose |
 |-------|---------|
 | `users` | Single-user auth (username, password_hash) |
-| `instances` | Claude Code instance config + status (repo_path, permission_mode, model, current_session_id, status) |
+| `instances` | Claude Code instance config + status (repo_path, permission_mode, model, current_session_id, status, is_pinned) |
 | `sessions` | Session history per instance (started_at, message_count, summary) |
 | `messages` | Message cache (legacy — SDK .jsonl sourced) |
 | `chat_messages` | **Primary message relay** — Realtime-enabled, used for phone↔bridge communication |
@@ -159,12 +160,13 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 | `events` | Structured event log (level, event name, details JSON) |
 | `discovered_repos` | Auto-discovered local repos (name, path) — synced by bridge on startup |
 | `bridge_status` | Single-row heartbeat table (id="default", last_heartbeat_at, status) |
+| `push_subscriptions` | Web Push notification subscriptions (endpoint, VAPID keys) |
 
 **Realtime-enabled tables:** `chat_messages`, `instances`, `permission_requests`
 - These tables have `REPLICA IDENTITY FULL` (required for Realtime UPDATE events)
 - Realtime must be explicitly enabled per table in Supabase dashboard
 
-**Migrations:** `supabase/migrations/` — 8 files, applied sequentially by timestamp prefix.
+**Migrations:** `supabase/migrations/` — 15 files, applied sequentially by timestamp prefix.
 
 ## Patterns and Conventions
 
@@ -201,6 +203,12 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 | `PORT` | 3100 | — | Server port |
 | `MCP_PLAN_REVIEW_PATH` | `/Users/agents/tools/plan-review-mcp` | — | Path to plan-review MCP server (skipped if not found) |
 | `OPENAI_API_KEY` | — | — | For voice transcription via Whisper (optional) |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | — | — | VAPID public key for Web Push (browser-side) |
+| `VAPID_PUBLIC_KEY` | — | — | VAPID public key (server-side, same value) |
+| `VAPID_PRIVATE_KEY` | — | — | VAPID private key (server-side only) |
+| `VAPID_SUBJECT` | — | — | VAPID subject (mailto: or URL) |
+| `APP_URL` | — | — | App URL for bridge→API push calls (e.g. https://claude-hub.vercel.app) |
+| `PUSH_API_SECRET` | — | — | Bearer token for bridge→push API auth |
 
 ## Important Implementation Details
 
@@ -216,6 +224,10 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 - **Permission mode mapping** (`lib/instance-manager.ts`): DB value `"auto"` maps to SDK `"bypassPermissions"`. Valid SDK modes: `bypassPermissions`, `acceptEdits`, `plan`, `default`.
 - **Intentional `as any` casts** (`lib/instance-manager.ts`, API routes): Used on `supabase.from()` calls as a workaround — the hand-written `Database` interface doesn't always satisfy Supabase's strict `GenericTable` constraints at compile time, but works correctly at runtime.
 - **Startup cleanup** (`server.ts`): On bridge start, resets stale "running" instances to "queued" and marks orphaned "streaming" messages as "error" with "[Bridge restarted]" content.
+- **Push notifications** (`lib/push-client.ts`, `lib/push-server.ts`): Web Push API for phone notifications. Bridge sends via `/api/push/send` (Bearer token auth). Subscriptions stored in `push_subscriptions` table. Notifies on: permission requests, instance completion, errors. Stale subscriptions (410 Gone) auto-deleted. Enable in Settings page.
+- **Instance pinning** (`instances.is_pinned` column): Pinned instances sort to top in all list views. Toggle via 3-dots menu. Pin icon (blue) shown next to pinned instance names.
+- **Attention tracking** (`lib/use-needs-attention.ts`): Detects instances needing user attention via two mechanisms: (1) live `running → idle` transition detection, (2) missed completion detection (idle instances with recent `updated_at` not yet seen). Shows amber "Approval" badge for pending permissions, green "Done" badge for completions. Attention items sorted to top in chat list. Completions tracked in localStorage to survive page refreshes.
+- **Unified connectivity status** (`components/hub/connection-status.tsx`): Single banner showing worst connectivity state. Priority: phone offline (red) > bridge offline with restart button (amber) > Supabase Realtime disconnected (yellow). Hidden when all healthy. Mounted in hub layout above all pages.
 
 ## Interactive Tool UI
 

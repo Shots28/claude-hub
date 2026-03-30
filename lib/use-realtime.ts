@@ -457,10 +457,16 @@ export function useRealtime(): RealtimeState {
       const BASE_DELAY = 1000;
       let attempt = 0;
 
-      const doSend = async (): Promise<boolean> => {
+      // Track whether the request reached the server (for retry decisions)
+      let serverMayHaveReceived = false;
+
+      const doSend = async (): Promise<"ok" | "retriable" | "not_retriable"> => {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10_000);
+          // 30s timeout — Vercel cold starts + auto-naming DB queries can take time.
+          // Previous 10s timeout caused premature aborts → retries → duplicate messages.
+          const timeoutId = setTimeout(() => controller.abort(), 30_000);
+          serverMayHaveReceived = true; // Once fetch starts, server may have received it
 
           const res = await fetch(`/api/instances/${instanceId}/messages`, {
             method: "POST",
@@ -495,29 +501,65 @@ export function useRealtime(): RealtimeState {
             sendRetryCountRef.current = 0;
             // Start polling for the response
             startPolling(instanceId);
-            return true;
+            return "ok";
+          } else if (res.status >= 500) {
+            console.error("[realtime] sendMessage server error:", res.status);
+            return "retriable";
           } else {
             console.error("[realtime] sendMessage failed:", res.status);
-            return false;
+            return "not_retriable"; // 4xx errors shouldn't be retried
           }
         } catch (err) {
+          // AbortError = timeout. The request likely reached the server and the message
+          // was inserted, but the response didn't make it back. Do NOT retry — the
+          // server-side idempotency check would catch it, but it's better to avoid the
+          // extra round-trip. The polling fallback will pick up the response.
+          if (err instanceof DOMException && err.name === "AbortError") {
+            console.warn("[realtime] sendMessage timed out — assuming server received it, starting poll");
+            // Mark as delivered (optimistically) and start polling for the response
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === optimisticId
+                  ? { ...m, deliveryStatus: "delivered" as const }
+                  : m,
+              ),
+            );
+            startPolling(instanceId);
+            return "ok"; // Treat timeout as success — don't retry
+          }
           console.error("[realtime] sendMessage error:", err);
-          return false;
+          // Network error before request was sent — safe to retry
+          return serverMayHaveReceived ? "not_retriable" : "retriable";
         }
       };
 
       // First attempt
-      if (await doSend()) return;
+      const firstResult = await doSend();
+      if (firstResult !== "retriable") {
+        if (firstResult === "not_retriable") {
+          // Mark as failed immediately — no retry
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === optimisticId
+                ? { ...m, deliveryStatus: "failed" as const }
+                : m,
+            ),
+          );
+          setConnectionError("Failed to send message — tap to retry");
+        }
+        return;
+      }
 
-      // Retry with exponential backoff + jitter
+      // Only retry on clearly retriable errors (server 500s, pre-connect network failures)
       while (attempt < MAX_RETRIES) {
         attempt++;
         const delay = Math.min(BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000, 16_000);
         console.log(`[realtime] Retry attempt ${attempt}/${MAX_RETRIES} in ${Math.round(delay)}ms`);
         await new Promise((resolve) => setTimeout(resolve, delay));
 
-        if (await doSend()) {
-          sendRetryCountRef.current = 0;
+        const result = await doSend();
+        if (result !== "retriable") {
+          if (result === "ok") sendRetryCountRef.current = 0;
           return;
         }
       }

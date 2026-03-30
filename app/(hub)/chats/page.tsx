@@ -55,7 +55,7 @@ function ChatsPageContent() {
   }, [searchParams, realtime.instances, selectedId]);
 
   // Track instances needing attention
-  const { totalAttention, hasAttention, needsAttention } = useNeedsAttention(
+  const { totalAttention, hasAttention, needsAttention, markSeen } = useNeedsAttention(
     realtime.instances,
     realtime.pendingPermissions,
     selectedId || undefined
@@ -95,8 +95,9 @@ function ChatsPageContent() {
   // Desktop: select in sidebar
   const handleSelectInstance = useCallback((id: string) => {
     setSelectedId(id);
+    if (hasAttention(id)) markSeen(id);
     router.push(`/chats?id=${id}`, { scroll: false });
-  }, [router]);
+  }, [router, hasAttention, markSeen]);
 
   const handleRefresh = useCallback(() => {
     realtime.refreshInstances();
@@ -219,6 +220,7 @@ function ChatsPageContent() {
                     <div className="flex items-center rounded-xl bg-hub-surface-2 overflow-hidden">
                       <Link
                         href={`/instances/${inst.id}`}
+                        onClick={() => { if (hasAttention(inst.id)) markSeen(inst.id); }}
                         className="flex-1 flex items-center gap-3 px-4 py-4 hover:bg-hub-border active:bg-hub-border transition-colors"
                       >
                         <StatusBadge status={inst.status as InstanceStatus} size="md" />

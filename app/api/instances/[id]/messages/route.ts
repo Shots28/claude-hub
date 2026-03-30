@@ -146,6 +146,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
       content = content + attachmentBlock;
     }
 
+    // Idempotency check: reject duplicate messages with same content within 30s.
+    // This prevents the phone's retry logic from inserting the same message multiple times
+    // when the POST succeeds server-side but the response doesn't reach the phone (timeout/network).
+    const thirtySecondsAgo = new Date(Date.now() - 30_000).toISOString();
+    const { data: recentDup } = await (supabase.from("chat_messages") as any)
+      .select("id")
+      .eq("instance_id", id)
+      .eq("role", "user")
+      .eq("content", content)
+      .gte("created_at", thirtySecondsAgo)
+      .limit(1);
+
+    if (recentDup && recentDup.length > 0) {
+      console.log("[messages/POST] Duplicate message detected within 30s window, returning existing:", recentDup[0].id);
+      // Return the existing message as if we just inserted it — the phone treats this as success
+      const { data: existingMsg } = await (supabase.from("chat_messages") as any)
+        .select("*")
+        .eq("id", recentDup[0].id)
+        .single();
+      const alreadyBusy = currentStatus === "running" || currentStatus === "queued";
+      return NextResponse.json({ message: existingMsg, queued: alreadyBusy, deduplicated: true }, { status: 201 });
+    }
+
     // Insert into chat_messages (the realtime table)
     console.log("[messages/POST] Inserting user message for instance:", id, "content length:", content.length);
     const { data, error } = await (supabase.from("chat_messages") as any)

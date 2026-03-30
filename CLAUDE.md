@@ -222,7 +222,10 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 ## Important Implementation Details
 
 - **Dual message pickup** (`server.ts`): Bridge uses BOTH Supabase Realtime subscription (primary, instant) AND 30-second polling interval (fallback). Both paths call `manager.sendMessage()`.
-- **Deduplication** (`server.ts` poll loop): Poll only processes a queued instance if the latest `chat_messages` row has `role="user"` (no assistant reply yet). Once bridge responds, latest message becomes `role="assistant"` and poll won't re-trigger.
+- **Deduplication** (`server.ts` poll loop): Poll only processes a queued instance if the latest `chat_messages` row has `role="user"` (no assistant reply yet). Once bridge responds, latest message becomes `role="assistant"` and poll won't re-trigger. Poll also checks `instanceLocks` before processing (skips if Realtime handler is active).
+- **Bridge dedup eviction** (`server.ts`): `processedMessageIds` is a `Map<id, timestamp>` (not a Set). Entries older than 10 minutes are evicted every minute. Previous approach (clearing the entire Set every 5 minutes) created dedup gaps where messages processed just before the clear could be re-triggered.
+- **Server-side idempotency** (`app/api/instances/[id]/messages/route.ts`): Before inserting a user message, checks for an identical message (same instance + content) within the last 30 seconds. Returns the existing message on duplicate — prevents phone retry logic from creating multiple DB rows.
+- **Phone retry safety** (`lib/use-realtime.ts`): 30-second timeout (not 10s). Timeouts treated as success (message likely reached server). Only retries on server 500s or pre-connect network failures. Prevents the primary cause of duplicate messages.
 - **Message ordering** (`server.ts` poll loop): If multiple user messages arrive while busy, poll processes the LATEST one. This is correct because session resume gives Claude the full conversation history.
 - **Session resume** (`lib/instance-manager.ts` `sendMessage()`): `instance.current_session_id` is passed to SDK `query()` with `resume` option. If resume throws (any error), clears session ID and starts fresh. No user-visible disruption.
 - **Concurrency** (`lib/instance-manager.ts` `Semaphore` class): FIFO async semaphore limits concurrent SDK queries. Default 3 permits. Excess queries wait in queue.
@@ -235,7 +238,9 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 - **Startup cleanup** (`server.ts`): On bridge start, resets stale "running" instances to "queued" and marks orphaned "streaming" messages as "error" with "[Bridge restarted]" content.
 - **Push notifications** (`lib/push-client.ts`, `lib/push-server.ts`): Web Push API for phone notifications. Bridge sends via `/api/push/send` (Bearer token auth). Subscriptions stored in `push_subscriptions` table. Notifies on: permission requests, instance completion, errors. Stale subscriptions (410 Gone) auto-deleted. Enable in Settings page.
 - **Instance pinning** (`instances.is_pinned` column): Pinned instances sort to top in all list views. Toggle via 3-dots menu. Pin icon (blue) shown next to pinned instance names.
-- **Attention tracking** (`lib/use-needs-attention.ts`): Detects instances needing user attention via two mechanisms: (1) live `running → idle` transition detection, (2) missed completion detection (idle instances with recent `updated_at` not yet seen). Shows amber "Approval" badge for pending permissions, green "Done" badge for completions. Attention items sorted to top in chat list. Completions tracked in localStorage to survive page refreshes.
+- **Attention tracking** (`lib/use-needs-attention.ts`): Detects instances needing user attention via two mechanisms: (1) live `running → idle` transition detection, (2) missed completion detection (idle instances with recent `updated_at` not yet seen). Shows amber "Approval" badge for pending permissions, green "Done" badge for completions. Attention items sorted to top in chat list. Dismissals tracked in localStorage as `{ instanceId: dismissedAtTimestamp }` — a completion is dismissed if `dismissedAt >= updated_at`. Entries auto-expire after 1 hour. Tapping a chat in the list calls `markSeen()` to immediately dismiss its badge. The hub layout's hook auto-dismisses completions when navigating to an instance page.
+- **Message idempotency** (`app/api/instances/[id]/messages/route.ts`): POST endpoint checks for duplicate user messages with identical content within a 30-second window before inserting. Returns the existing message if found, preventing duplicates from phone retry logic when the server response doesn't reach the client (timeout/network).
+- **Send retry logic** (`lib/use-realtime.ts`): Retry categorization — 500s are retriable, 4xx are not, timeouts are treated as success (server likely received it). 30-second fetch timeout (up from 10s) to accommodate Vercel cold starts. On timeout, starts polling for the response instead of retrying.
 - **Unified connectivity status** (`components/hub/connection-status.tsx`): Single banner showing worst connectivity state. Priority: phone offline (red) > bridge offline with restart button (amber) > Supabase Realtime disconnected (yellow). Hidden when all healthy. Mounted in hub layout above all pages.
 - **Instance auto-naming** (`app/api/instances/[id]/messages/route.ts`): On first user message, if the instance name is still the default repo folder name (e.g., "claude-hub" or "claude-hub (2)"), auto-renames to the first 80 chars of the user's prompt. Session imports also use session preview as the name. This gives instances descriptive names like "Fix the login bug" instead of generic repo names.
 - **Repo path normalization**: Both instance creation (`POST /api/instances`) and session import (`POST /api/sessions/import`) strip trailing slashes from repo paths. Prevents duplicate instances caused by path variations (e.g., `/Users/foo/repo` vs `/Users/foo/repo/`).
@@ -350,6 +355,26 @@ lsof -ti:3100    # Check process
 If polling runs before the API response replaces the optimistic message, it adds the real DB message as a new entry (different ID from `optimistic-*`), resulting in two copies.
 
 **Fix**: The polling merge logic now checks for optimistic messages with matching content before adding a new entry (commit 2b69e94).
+
+### Duplicate Messages from Phone Retry Logic (3-4x responses)
+
+**Symptoms**: User sends one message from phone, Claude responds 3-4 times with different responses. Some are duplicates, some are unique (Claude generates a fresh response each time).
+
+**Root cause**: The phone's `sendMessage` in `lib/use-realtime.ts` had a 10-second timeout + 5 retries with exponential backoff. When the API took >10s (Vercel cold start, auto-naming DB queries), the timeout fired and the retry logic inserted **additional copies** of the same message, each with a **different database ID**. The bridge's `processedMessageIds` dedup didn't help because each retry created a distinct message.
+
+**Timeline of the bug:**
+1. Phone sends POST → message A inserted → Realtime fires for A
+2. Phone times out (10s) → retry → message B inserted → Realtime fires for B
+3. Another retry → message C inserted → Realtime fires for C
+4. Bridge processes A, B, C as three separate messages → three different Claude responses
+
+**Fix** (three layers of defense):
+
+1. **Server-side idempotency** (`app/api/instances/[id]/messages/route.ts`): Before inserting, checks if an identical user message (same instance_id + content) exists within the last 30 seconds. If so, returns the existing message instead of inserting a duplicate. This is the primary defense.
+
+2. **Client-side retry rewrite** (`lib/use-realtime.ts`): Timeout increased from 10s → 30s. Timeouts are now treated as success (message almost certainly reached the server; polling picks up the response). Retries only happen on clearly retriable errors (server 500s, pre-connect network failures). 4xx errors and post-connect failures are not retried.
+
+3. **Bridge dedup hardening** (`server.ts`): `processedMessageIds` changed from `Set` (cleared entirely every 5 min, causing dedup gaps) to `Map<id, timestamp>` with per-entry eviction at 10 minutes. Poll now checks `instanceLocks` before processing (skips if Realtime handler is active).
 
 ### Duplicate Messages from Session Sync
 

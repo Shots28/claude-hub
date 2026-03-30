@@ -760,7 +760,7 @@ async function initBridge(
             // Realtime handler doesn't try to execute them as new user queries
             for (const msg of inserted) {
               if (msg.role === "user") {
-                processedMessageIds.add(msg.id);
+                processedMessageIds.set(msg.id, Date.now());
               }
             }
           }
@@ -923,13 +923,19 @@ async function initBridge(
   // --- Deduplication: track processed message IDs and per-instance locks ---
   // Supabase Realtime has at-least-once delivery, so duplicate events are possible.
   // We track processed message IDs to avoid re-processing the same user message.
-  const processedMessageIds = new Set<string>();
+  // Track processed message IDs with timestamps for time-based eviction.
+  // Using a Map (id → timestamp) instead of Set so we can evict entries
+  // older than 10 minutes without losing recent dedup protection.
+  const processedMessageIds = new Map<string, number>();
   const instanceLocks = new Set<string>(); // Synchronous lock before any async work
 
-  // Evict old entries periodically to prevent unbounded growth
+  // Evict entries older than 10 minutes (not a full clear, which caused dedup gaps)
   setInterval(() => {
-    processedMessageIds.clear();
-  }, 5 * 60_000); // Clear every 5 minutes
+    const cutoff = Date.now() - 10 * 60_000;
+    for (const [id, ts] of processedMessageIds) {
+      if (ts < cutoff) processedMessageIds.delete(id);
+    }
+  }, 60_000); // Check every minute
 
   // --- Supabase Realtime subscription (primary trigger) ---
   const channel = bridgeSupabase
@@ -951,7 +957,7 @@ async function initBridge(
           console.log(`[bridge] Skipping duplicate Realtime event for message ${messageId}`);
           return;
         }
-        if (messageId) processedMessageIds.add(messageId);
+        if (messageId) processedMessageIds.set(messageId, Date.now());
 
         // Only process local instances — check cache first, then DB fallback
         if (!localInstanceIds.has(instanceId)) {
@@ -1033,7 +1039,7 @@ async function initBridge(
             if (latest[0].id && processedMessageIds.has(latest[0].id)) {
               console.log(`[bridge] Re-check: message ${latest[0].id} already processed, skipping`);
             } else {
-              if (latest[0].id) processedMessageIds.add(latest[0].id);
+              if (latest[0].id) processedMessageIds.set(latest[0].id, Date.now());
               console.log(`[bridge] Re-processing pending message ${latest[0].id} for instance ${instanceId}`);
               manager.sendMessage(instanceId, latest[0].content)
                 .then(async () => {
@@ -1104,12 +1110,13 @@ async function initBridge(
       for (const inst of queued) {
         if (manager.isRunning(inst.id)) continue;
 
+        // Fetch last 2 messages to check if latest user message already has a response
         const { data: latest } = await bridgeSupabase
           .from("chat_messages")
           .select("id, role, content")
           .eq("instance_id", inst.id)
           .order("created_at", { ascending: false })
-          .limit(1);
+          .limit(2);
 
         if (latest?.[0]?.role === "user") {
           // Skip if this message was already processed by Realtime handler
@@ -1121,7 +1128,12 @@ async function initBridge(
               .eq("id", inst.id);
             continue;
           }
-          if (latest[0].id) processedMessageIds.add(latest[0].id);
+          // Skip if the instance is locked (Realtime handler is processing)
+          if (instanceLocks.has(inst.id)) {
+            console.log(`[bridge-poll] Instance ${inst.id} locked by Realtime handler, skipping`);
+            continue;
+          }
+          if (latest[0].id) processedMessageIds.set(latest[0].id, Date.now());
           console.log(`[bridge-poll] Processing queued instance ${inst.id} (msg: ${latest[0].id})`);
           manager.sendMessage(inst.id, latest[0].content)
             .then(async () => {

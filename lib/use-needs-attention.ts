@@ -12,29 +12,44 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { DbInstance, DbPendingPermission } from "@/lib/types";
 
-const SEEN_COMPLETIONS_KEY = "hub_seen_completions_";
+const DISMISSED_KEY = "hub_dismissed_completions";
 
-function getSeenCompletions(instanceId: string): Set<string> {
-  if (typeof window === "undefined") return new Set();
+/** Returns { instanceId: dismissedAtTimestamp } */
+function getDismissedCompletions(): Record<string, number> {
+  if (typeof window === "undefined") return {};
   try {
-    const stored = localStorage.getItem(`${SEEN_COMPLETIONS_KEY}${instanceId}`);
-    return stored ? new Set(JSON.parse(stored)) : new Set();
+    const stored = localStorage.getItem(DISMISSED_KEY);
+    if (!stored) return {};
+    const parsed = JSON.parse(stored) as Record<string, number>;
+    // Clean up entries older than 1 hour
+    const now = Date.now();
+    const cleaned: Record<string, number> = {};
+    for (const [id, time] of Object.entries(parsed)) {
+      if (now - time < 60 * 60 * 1000) cleaned[id] = time;
+    }
+    return cleaned;
   } catch {
-    return new Set();
+    return {};
   }
 }
 
-function markCompletionSeen(instanceId: string, timestamp: string): void {
+function dismissCompletion(instanceId: string): void {
   if (typeof window === "undefined") return;
   try {
-    const seen = getSeenCompletions(instanceId);
-    seen.add(timestamp);
-    // Keep only last 50 entries to avoid localStorage bloat
-    const arr = Array.from(seen).slice(-50);
-    localStorage.setItem(`${SEEN_COMPLETIONS_KEY}${instanceId}`, JSON.stringify(arr));
+    const dismissed = getDismissedCompletions();
+    dismissed[instanceId] = Date.now();
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
   } catch {
     // Storage unavailable
   }
+}
+
+/** A completion is dismissed if we dismissed it AFTER the instance was last updated */
+function isCompletionDismissed(instanceId: string, updatedAt: string): boolean {
+  const dismissed = getDismissedCompletions();
+  const dismissedAt = dismissed[instanceId];
+  if (!dismissedAt) return false;
+  return dismissedAt >= new Date(updatedAt).getTime();
 }
 
 export interface AttentionState {
@@ -78,20 +93,18 @@ export function useNeedsAttention(
       const prevStatus = prevStatusRef.current[inst.id];
       if (prevStatus === "running" && inst.status === "idle") {
         // Live transition detected
-        const seen = getSeenCompletions(inst.id);
-        if (!seen.has(inst.updated_at)) {
+        if (!isCompletionDismissed(inst.id, inst.updated_at)) {
           completedInstancesRef.current.add(inst.id);
         }
       }
 
       // Also detect missed completions (app opened after Claude finished)
-      // If idle, updated recently (within 30 min), and not yet seen
+      // If idle, updated recently (within 30 min), and not yet dismissed
       if (inst.status === "idle" && inst.updated_at && !prevStatus) {
         const updatedAt = new Date(inst.updated_at).getTime();
         const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
         if (updatedAt > thirtyMinAgo) {
-          const seen = getSeenCompletions(inst.id);
-          if (!seen.has(inst.updated_at)) {
+          if (!isCompletionDismissed(inst.id, inst.updated_at)) {
             completedInstancesRef.current.add(inst.id);
           }
         }
@@ -145,21 +158,17 @@ export function useNeedsAttention(
   useEffect(() => {
     if (!currentInstanceId) return;
 
-    // Mark completion as seen when viewing
-    const inst = instances.find((i) => i.id === currentInstanceId);
-    if (inst && completedInstancesRef.current.has(currentInstanceId)) {
-      markCompletionSeen(currentInstanceId, inst.updated_at);
+    // Mark completion as dismissed when viewing
+    if (completedInstancesRef.current.has(currentInstanceId)) {
+      dismissCompletion(currentInstanceId);
       completedInstancesRef.current.delete(currentInstanceId);
     }
   }, [currentInstanceId, instances]);
 
   const markSeen = useCallback((instanceId: string) => {
-    const inst = instances.find((i) => i.id === instanceId);
-    if (inst) {
-      markCompletionSeen(instanceId, inst.updated_at);
-      completedInstancesRef.current.delete(instanceId);
-    }
-  }, [instances]);
+    dismissCompletion(instanceId);
+    completedInstancesRef.current.delete(instanceId);
+  }, []);
 
   const hasAttention = useCallback(
     (instanceId: string) => !!needsAttention[instanceId],

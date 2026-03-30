@@ -55,9 +55,11 @@ export async function GET(req: NextRequest) {
       .insert({
         id: testId,
         instance_id: "health-check-instance",
-        role: "system",
+        role: "system" as const,
         content: "Health check test message",
-        status: "done",
+        status: "done" as const,
+        tool_name: null,
+        tool_id: null,
       })
       .select()
       .single();

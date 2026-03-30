@@ -462,6 +462,23 @@ If polling runs before the API response replaces the optimistic message, it adds
 
 **Lesson**: Idempotency must be enforced at the server level — client-side retry logic alone can't prevent duplicates when the failure mode is "request succeeded but response lost."
 
+### Duplicate Messages from Double-Tap on Mobile (2025-03-30)
+
+**Symptoms**: User sends one message from phone, two identical user messages appear with two different Claude responses.
+
+**Root cause**: Two rapid taps on the Send button both capture the same `text` state before React re-renders with `setText("")`. Both fire `onSend()` simultaneously, creating two concurrent POST requests. The server-side SELECT-before-INSERT dedup check has a TOCTOU (Time-of-Check vs Time-of-Use) race: both SELECTs find no duplicate (neither INSERT has completed yet), so both proceed to INSERT, creating two messages with different IDs. The bridge treats these as distinct messages and processes both.
+
+**Why existing dedup didn't catch it**:
+- Server-side 30s idempotency check: SELECT runs before INSERT completes — concurrent requests race past it
+- Bridge `processedMessageIds`: Keyed on message ID — two different DB rows with different IDs aren't deduplicated
+- Client retry logic: Designed for sequential retries, not concurrent sends
+
+**Fix** (two layers):
+1. **ChatInput `isSending` guard** (`components/hub/chat-input.tsx`): `isSending` state set `true` immediately on first tap, gates `canSend` to disable the send button, cleared in `finally` block.
+2. **`sendInFlightRef` guard** (`lib/use-realtime.ts`): Ref tracks whether a `sendMessage` is in-flight for a given instance. Concurrent calls for the same instance are silently dropped. Cleared in `finally` block.
+
+**Lesson**: Client-side UI guards (disabling buttons) are the first line of defense against double-tap. Server-side SELECT-before-INSERT is not atomic — it cannot prevent concurrent duplicate inserts without database-level constraints (unique index or advisory locks).
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)

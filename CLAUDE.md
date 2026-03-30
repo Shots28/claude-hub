@@ -228,6 +228,8 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 - **Instance pinning** (`instances.is_pinned` column): Pinned instances sort to top in all list views. Toggle via 3-dots menu. Pin icon (blue) shown next to pinned instance names.
 - **Attention tracking** (`lib/use-needs-attention.ts`): Detects instances needing user attention via two mechanisms: (1) live `running → idle` transition detection, (2) missed completion detection (idle instances with recent `updated_at` not yet seen). Shows amber "Approval" badge for pending permissions, green "Done" badge for completions. Attention items sorted to top in chat list. Completions tracked in localStorage to survive page refreshes.
 - **Unified connectivity status** (`components/hub/connection-status.tsx`): Single banner showing worst connectivity state. Priority: phone offline (red) > bridge offline with restart button (amber) > Supabase Realtime disconnected (yellow). Hidden when all healthy. Mounted in hub layout above all pages.
+- **Instance auto-naming** (`app/api/instances/[id]/messages/route.ts`): On first user message, if the instance name is still the default repo folder name (e.g., "claude-hub" or "claude-hub (2)"), auto-renames to the first 80 chars of the user's prompt. Session imports also use session preview as the name. This gives instances descriptive names like "Fix the login bug" instead of generic repo names.
+- **Repo path normalization**: Both instance creation (`POST /api/instances`) and session import (`POST /api/sessions/import`) strip trailing slashes from repo paths. Prevents duplicate instances caused by path variations (e.g., `/Users/foo/repo` vs `/Users/foo/repo/`).
 
 ## Interactive Tool UI
 
@@ -354,6 +356,21 @@ If polling runs before the API response replaces the optimistic message, it adds
 1. `initSessionSyncCounts` reads actual JSONL files instead of DB row count
 2. `sessionMessageCounts` updated after every `sendMessage()` call
 3. Session sync inserts wrapped in `instanceLocks` to prevent Realtime race
+
+### Phantom Instances with Generic Names
+
+**Symptoms**: Instances appear unexpectedly, all named after the repo folder (e.g., "claude-hub"), hard to tell apart.
+
+**Root causes**:
+1. **Session import auto-creates instances**: `POST /api/sessions/import` creates a new instance whenever you import a session for a repo that doesn't have one. Each click of "Continue from Desktop" can create one.
+2. **Repo path mismatch creates duplicates**: A trailing slash difference (e.g., `/path/repo` vs `/path/repo/`) causes the `eq("repo_path", ...)` check to miss existing instances.
+3. **Default names are generic**: Both create modal and session import used `folder.name` or `repoPath.split("/").pop()` as the name.
+
+**Fix** (commit 494bf68):
+1. Session import uses session preview (first user prompt) as instance name instead of repo name
+2. First user message auto-renames instance if name still matches the default folder pattern
+3. Repo paths normalized (trailing slashes stripped) in both create and import routes
+4. Error details returned from create API for easier debugging
 
 ## Known Limitations
 

@@ -4,7 +4,7 @@
 // Supports horizontal swipe gestures to navigate between instances
 // ---------------------------------------------------------------------------
 
-import { use, useMemo } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "@/components/hub/chat-view";
 import { useHubRealtime } from "@/lib/hub-context";
 import { useSwipeNavigation } from "@/lib/use-swipe-navigation";
@@ -27,6 +27,7 @@ export default function InstancePage({ params }: InstancePageProps) {
     approvePermission,
     denyPermission,
     loadMessages,
+    refreshInstances,
   } = useHubRealtime();
 
   // Get sorted instance IDs for swipe navigation
@@ -48,7 +49,26 @@ export default function InstancePage({ params }: InstancePageProps) {
     [instances, instanceId],
   );
 
+  // If instance not found yet, try refreshing (handles race after session import)
+  const [retried, setRetried] = useState(false);
+  const retriedRef = useRef(false);
+  useEffect(() => {
+    if (!instance && !retriedRef.current) {
+      retriedRef.current = true;
+      refreshInstances().finally(() => setRetried(true));
+    }
+  }, [instance, refreshInstances]);
+
   if (!instance) {
+    // Still loading / refreshing
+    if (!retried) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-hub-accent/30 border-t-hub-accent rounded-full animate-spin" />
+        </div>
+      );
+    }
+
     return (
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="text-center">

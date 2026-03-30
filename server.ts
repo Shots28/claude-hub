@@ -512,14 +512,105 @@ async function initBridge(
       schema: "public",
       table: "instances",
     }, async (payload: any) => {
-      const { id, status } = payload.new;
+      const { id, status, current_session_id, repo_path } = payload.new;
+      const oldSessionId = payload.old?.current_session_id;
+
       // If user set status to "idle" via the interrupt API, abort the running query
       if (status === "idle" && localInstanceIds.has(id) && manager.isRunningOrQueued(id)) {
         console.log(`[bridge] User interrupted instance ${id}, aborting...`);
         await manager.interrupt(id);
       }
+
+      // Detect session import: session_id changed and instance is local
+      if (current_session_id && current_session_id !== oldSessionId && repo_path) {
+        importSessionMessages(id, current_session_id, repo_path).catch(err => {
+          console.error(`[bridge] Session import failed for ${id}:`, err);
+        });
+      }
     })
     .subscribe();
+
+  // --- Session import handler ---
+  // When a phone user imports a desktop session, the API sets current_session_id
+  // on the instance. The bridge detects this via Realtime and reads the local JSONL
+  // file to populate chat_messages.
+  async function importSessionMessages(instanceId: string, sessionId: string, repoPath: string) {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { homedir } = await import("node:os");
+
+    const projectKey = repoPath.replace(/\//g, "-");
+    const sessionPath = join(homedir(), ".claude", "projects", projectKey, `${sessionId}.jsonl`);
+
+    console.log(`[bridge] Importing session ${sessionId.slice(0, 8)}... for instance ${instanceId.slice(0, 8)}...`);
+
+    let content: string;
+    try {
+      content = await readFile(sessionPath, "utf-8");
+    } catch {
+      console.error(`[bridge] Session file not found: ${sessionPath}`);
+      return;
+    }
+
+    const lines = content.trim().split("\n").filter(Boolean);
+    const messagesToInsert: any[] = [];
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type !== "user" && entry.type !== "assistant") continue;
+
+        let msgContent = "";
+        const messageContent = entry.message?.content;
+        if (typeof messageContent === "string") {
+          msgContent = messageContent;
+        } else if (Array.isArray(messageContent)) {
+          const textParts = messageContent
+            .filter((c: any) => c.type === "text")
+            .map((c: any) => c.text);
+          msgContent = textParts.join("\n");
+        }
+        if (!msgContent) continue;
+
+        messagesToInsert.push({
+          instance_id: instanceId,
+          role: entry.type === "user" ? "user" : "assistant",
+          content: msgContent,
+          status: "done",
+          created_at: entry.timestamp || new Date().toISOString(),
+          tool_name: null,
+          tool_id: null,
+        });
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    if (messagesToInsert.length === 0) {
+      console.log(`[bridge] No messages to import for session ${sessionId.slice(0, 8)}...`);
+      return;
+    }
+
+    // Clear existing messages for this instance
+    await bridgeSupabase
+      .from("chat_messages")
+      .delete()
+      .eq("instance_id", instanceId);
+
+    // Insert in batches (Supabase REST limit)
+    const BATCH = 500;
+    for (let i = 0; i < messagesToInsert.length; i += BATCH) {
+      const batch = messagesToInsert.slice(i, i + BATCH);
+      const { error } = await bridgeSupabase
+        .from("chat_messages")
+        .insert(batch);
+      if (error) {
+        console.error(`[bridge] Message insert error (batch ${i / BATCH}):`, error);
+      }
+    }
+
+    console.log(`[bridge] Imported ${messagesToInsert.length} messages for session ${sessionId.slice(0, 8)}...`);
+  }
 
   // Refresh local repo paths when discovered_repos changes (e.g., user triggers rescan)
   bridgeSupabase

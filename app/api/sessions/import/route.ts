@@ -1,22 +1,18 @@
 // ---------------------------------------------------------------------------
 // POST /api/sessions/import — Import a desktop session into Claude Hub
-// Creates an instance if needed, switches to the session, imports messages
+// Creates an instance if needed, sets the session ID, and signals the bridge
+// to import messages from the local JSONL file.
+// NOTE: Session files live on the bridge machine. This endpoint only does DB
+// operations; the bridge handles file I/O via the session_import_requests table.
 // ---------------------------------------------------------------------------
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { getSessionFromCookies } from "@/lib/auth";
-import { readFile } from "fs/promises";
-import { join } from "path";
-import { homedir } from "os";
 
 async function authenticate(req: NextRequest) {
   const cookieHeader = req.headers.get("cookie");
   return getSessionFromCookies(cookieHeader);
-}
-
-function repoPathToProjectKey(repoPath: string): string {
-  return repoPath.replace(/\//g, "-");
 }
 
 export async function POST(req: NextRequest) {
@@ -34,17 +30,6 @@ export async function POST(req: NextRequest) {
         { error: "sessionId and repoPath are required" },
         { status: 400 }
       );
-    }
-
-    // Verify session file exists
-    const projectKey = repoPathToProjectKey(repoPath);
-    const sessionPath = join(homedir(), ".claude", "projects", projectKey, `${sessionId}.jsonl`);
-
-    let sessionContent: string;
-    try {
-      sessionContent = await readFile(sessionPath, "utf-8");
-    } catch {
-      return NextResponse.json({ error: "Session file not found" }, { status: 404 });
     }
 
     // Find or create instance for this repo
@@ -85,64 +70,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to update session" }, { status: 500 });
     }
 
-    // Import messages to Supabase for display
-    const lines = sessionContent.trim().split("\n").filter(Boolean);
-    const messagesToInsert: any[] = [];
-
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-
-        if (entry.type !== "user" && entry.type !== "assistant") continue;
-
-        let content = "";
-        const messageContent = entry.message?.content;
-
-        if (typeof messageContent === "string") {
-          content = messageContent;
-        } else if (Array.isArray(messageContent)) {
-          const textParts = messageContent
-            .filter((c: any) => c.type === "text")
-            .map((c: any) => c.text);
-          content = textParts.join("\n");
-        }
-
-        if (!content) continue;
-
-        messagesToInsert.push({
-          instance_id: instance.id,
-          role: entry.type === "user" ? "user" : "assistant",
-          content,
-          status: "done",
-          created_at: entry.timestamp || new Date().toISOString(),
-          tool_name: null,
-          tool_id: null,
-        });
-      } catch {
-        // Skip malformed lines
-      }
-    }
-
-    if (messagesToInsert.length > 0) {
-      // Clear existing messages for this instance
-      await (supabase.from("chat_messages") as any)
-        .delete()
-        .eq("instance_id", instance.id);
-
-      // Insert imported messages
-      const { error: insertError } = await (supabase.from("chat_messages") as any)
-        .insert(messagesToInsert);
-
-      if (insertError) {
-        console.error("[sessions/import] Insert error:", insertError);
-        // Don't fail - messages are optional
-      }
-    }
+    // Bridge detects session_id changes via Realtime and imports messages
+    // from the local JSONL file automatically — no extra coordination needed.
 
     return NextResponse.json({
       success: true,
       instanceId: instance.id,
-      importedMessages: messagesToInsert.length,
+      importPending: true,
     });
   } catch (err) {
     console.error("[sessions/import] Error:", err);

@@ -414,15 +414,6 @@ function ChatsPageContent() {
         {/* Chat list */}
         <ChatList isMobile />
 
-        {/* Footer */}
-        <div className="flex-shrink-0 border-t border-hub-border px-4 py-3 bg-hub-surface">
-          <div className="text-sm text-hub-text-muted/60 text-center">
-            {realtime.instances.length} chat{realtime.instances.length !== 1 ? "s" : ""}
-            {totalAttention > 0 && (
-              <span className="text-red-400 font-medium"> · {totalAttention} need attention</span>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Desktop: Split view */}
@@ -463,15 +454,6 @@ function ChatsPageContent() {
           {/* Chat list */}
           <ChatList />
 
-          {/* Footer */}
-          <div className="border-t border-hub-border px-4 py-2">
-            <div className="text-[11px] text-hub-text-muted/60">
-              {realtime.instances.length} chat{realtime.instances.length !== 1 ? "s" : ""}
-              {totalAttention > 0 && (
-                <span className="text-orange-400"> · {totalAttention} need attention</span>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Right panel - Chat view */}

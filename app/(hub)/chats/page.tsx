@@ -265,7 +265,7 @@ function ChatsPageContent() {
                           </div>
                         </div>
                         {needsAtt && (
-                          <span className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0 animate-pulse" />
+                          <span className="min-w-[20px] h-[20px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1 flex-shrink-0">!</span>
                         )}
                       </Link>
 
@@ -326,7 +326,7 @@ function ChatsPageContent() {
                       {inst.name}
                     </span>
                     {needsAtt && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0 animate-pulse" />
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white px-1">!</span>
                     )}
                   </div>
                   {inst.last_message_preview && (

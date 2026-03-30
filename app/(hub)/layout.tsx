@@ -6,7 +6,7 @@
 // Force dynamic rendering to avoid SSR context issues
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { InstanceSidebar } from "@/components/hub/instance-sidebar";
@@ -35,15 +35,9 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
     activeInstanceId
   );
 
-  // Auto-clear badge when user navigates to /chats
-  const isOnChats = pathname?.startsWith("/chats");
-  const prevOnChatsRef = useRef(false);
-  useEffect(() => {
-    if (isOnChats && !prevOnChatsRef.current && totalAttention > 0) {
-      markAllSeen();
-    }
-    prevOnChatsRef.current = !!isOnChats;
-  }, [isOnChats, totalAttention, markAllSeen]);
+  // Badge clears when user TAPS the Chats button (onClick below),
+  // NOT on mount/return to the app. This prevents badges from clearing
+  // when the user leaves the PWA and comes back.
 
   // Determine active bottom nav tab
   const activeTab = pathname?.startsWith("/settings")
@@ -77,6 +71,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           {/* Chats */}
           <Link
             href="/chats"
+            onClick={markAllSeen}
             className={`relative flex flex-col items-center justify-center min-w-[64px] h-14 px-3 rounded-2xl transition-all active:scale-95 ${
               pathname?.startsWith("/chats")
                 ? "bg-hub-accent text-white"

@@ -1,13 +1,11 @@
 // ---------------------------------------------------------------------------
 // GET /api/sessions/all — List ALL local Claude Code sessions across all repos
 // Used by GlobalSessionPicker to show desktop sessions on the chats page
+// NOTE: Reads from Supabase (synced by bridge) - works on Vercel
 // ---------------------------------------------------------------------------
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookies } from "@/lib/auth";
-import { readdir, readFile, stat } from "fs/promises";
-import { join } from "path";
-import { homedir } from "os";
 
 interface LocalSession {
   id: string;
@@ -23,73 +21,6 @@ async function authenticate(req: NextRequest) {
   return getSessionFromCookies(cookieHeader);
 }
 
-// Convert project key back to repo path
-function projectKeyToRepoPath(key: string): string {
-  return key.replace(/-/g, "/");
-}
-
-// Parse a session file to extract metadata
-async function parseSessionFile(
-  filePath: string,
-  sessionId: string,
-  repoPath: string,
-  repoName: string
-): Promise<LocalSession | null> {
-  try {
-    const content = await readFile(filePath, "utf-8");
-    const lines = content.trim().split("\n").filter(Boolean);
-
-    if (lines.length === 0) return null;
-
-    let firstUserMessage = "";
-    let lastTimestamp = "";
-    let userCount = 0;
-    let assistantCount = 0;
-
-    for (const line of lines) {
-      try {
-        const entry = JSON.parse(line);
-
-        if (entry.timestamp) {
-          lastTimestamp = entry.timestamp;
-        }
-
-        if (entry.type === "user") {
-          userCount++;
-          if (!firstUserMessage && entry.message?.content) {
-            const content = entry.message.content;
-            if (typeof content === "string") {
-              firstUserMessage = content.slice(0, 100);
-            } else if (Array.isArray(content)) {
-              const textBlock = content.find((c: any) => c.type === "text");
-              if (textBlock?.text) {
-                firstUserMessage = textBlock.text.slice(0, 100);
-              }
-            }
-          }
-        } else if (entry.type === "assistant") {
-          assistantCount++;
-        }
-      } catch {
-        // Skip malformed lines
-      }
-    }
-
-    if (userCount === 0 && assistantCount === 0) return null;
-
-    return {
-      id: sessionId,
-      preview: firstUserMessage || "No preview available",
-      messageCount: userCount + assistantCount,
-      lastActivityAt: lastTimestamp || new Date().toISOString(),
-      repoPath,
-      repoName,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest) {
   const session = await authenticate(req);
   if (!session) {
@@ -97,64 +28,48 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const projectsDir = join(homedir(), ".claude", "projects");
-    let projectDirs: string[] = [];
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    try {
-      const entries = await readdir(projectsDir, { withFileTypes: true });
-      projectDirs = entries
-        .filter(e => e.isDirectory() && e.name.startsWith("-"))
-        .map(e => e.name);
-    } catch {
+    if (!supabaseUrl || !supabaseKey) {
+      return NextResponse.json(
+        { error: "Supabase not configured" },
+        { status: 500 }
+      );
+    }
+
+    // Read sessions from Supabase (synced by bridge)
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/local_sessions?select=id,repo_path,repo_name,preview,message_count,last_activity_at&order=last_activity_at.desc&limit=50`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("[sessions/all] Supabase error:", text);
+      // Return empty list instead of error - table might not exist yet
       return NextResponse.json({ sessions: [] });
     }
 
-    const allSessions: LocalSession[] = [];
+    const data = await res.json();
 
-    for (const projectDir of projectDirs) {
-      const projectPath = join(projectsDir, projectDir);
-      const repoPath = projectKeyToRepoPath(projectDir);
-      const repoName = repoPath.split("/").pop() || projectDir;
+    // Transform to frontend format
+    const sessions: LocalSession[] = data.map((row: any) => ({
+      id: row.id,
+      preview: row.preview || "No preview",
+      messageCount: row.message_count || 0,
+      lastActivityAt: row.last_activity_at || new Date().toISOString(),
+      repoPath: row.repo_path,
+      repoName: row.repo_name,
+    }));
 
-      try {
-        const files = await readdir(projectPath);
-        const sessionFiles = files.filter(f =>
-          f.endsWith(".jsonl") &&
-          !f.startsWith("agent-") &&
-          /^[0-9a-f-]+\.jsonl$/.test(f)
-        );
-
-        for (const file of sessionFiles) {
-          const sessionId = file.replace(".jsonl", "");
-          const filePath = join(projectPath, file);
-
-          // Get file stats for filtering old sessions
-          const fileStat = await stat(filePath).catch(() => null);
-          if (!fileStat) continue;
-
-          // Only include sessions from last 30 days
-          const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-          if (fileStat.mtimeMs < thirtyDaysAgo) continue;
-
-          const parsed = await parseSessionFile(filePath, sessionId, repoPath, repoName);
-          if (parsed) {
-            allSessions.push(parsed);
-          }
-        }
-      } catch {
-        // Skip inaccessible project dirs
-      }
-    }
-
-    // Sort by last activity (most recent first)
-    allSessions.sort((a, b) =>
-      new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime()
-    );
-
-    // Limit to 50 most recent
-    return NextResponse.json({
-      sessions: allSessions.slice(0, 50),
-    });
+    return NextResponse.json({ sessions });
   } catch (err) {
     console.error("[sessions/all] Error:", err);
     return NextResponse.json(

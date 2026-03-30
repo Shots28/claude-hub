@@ -120,6 +120,188 @@ async function syncFoldersToSupabase(folders: { name: string; path: string; is_g
 }
 
 // ---------------------------------------------------------------------------
+// Session scanner — syncs local IDE sessions to Supabase for phone access
+// ---------------------------------------------------------------------------
+
+interface LocalSession {
+  id: string;
+  repo_path: string;
+  repo_name: string;
+  preview: string;
+  message_count: number;
+  last_activity_at: string;
+}
+
+// Resolve a Claude project key (e.g. "-Users-agents-claude-hub") back to a real
+// filesystem path ("/Users/agents/claude-hub"). The key replaces "/" with "-", but
+// directory names can also contain dashes, so we walk the filesystem to disambiguate.
+async function resolveProjectPath(projectDir: string): Promise<string> {
+  const { existsSync } = await import("node:fs");
+
+  // Strip leading "-" (represents root "/"), split on remaining dashes
+  const parts = projectDir.slice(1).split("-"); // e.g. ["Users","agents","claude","hub"]
+
+  let resolved = "/";
+  let i = 0;
+
+  while (i < parts.length) {
+    // Try longest combination first (e.g. "orbital-deploy-1" before "orbital-deploy")
+    // then fall back to shorter ones. This ensures "orbital-deploy-1" beats "orbital-deploy/1".
+    let found = false;
+    for (let j = parts.length - 1; j >= i; j--) {
+      const combined = parts.slice(i, j + 1).join("-");
+      const candidate = resolved === "/" ? `/${combined}` : `${resolved}/${combined}`;
+      if (existsSync(candidate)) {
+        resolved = candidate;
+        i = j + 1;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      // Fallback: treat as separator (same as old behavior)
+      const single = resolved === "/" ? `/${parts[i]}` : `${resolved}/${parts[i]}`;
+      resolved = single;
+      i++;
+    }
+  }
+
+  return resolved;
+}
+
+async function scanLocalSessions(): Promise<LocalSession[]> {
+  const { readdir, readFile, stat } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { homedir } = await import("node:os");
+
+  const projectsDir = join(homedir(), ".claude", "projects");
+  const sessions: LocalSession[] = [];
+
+  let projectDirs: string[] = [];
+  try {
+    const entries = await readdir(projectsDir, { withFileTypes: true });
+    projectDirs = entries
+      .filter(e => e.isDirectory() && e.name.startsWith("-"))
+      .map(e => e.name);
+  } catch {
+    return [];
+  }
+
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+  for (const projectDir of projectDirs) {
+    const projectPath = join(projectsDir, projectDir);
+    const repoPath = await resolveProjectPath(projectDir);
+    const repoName = repoPath.split("/").pop() || projectDir;
+
+    try {
+      const files = await readdir(projectPath);
+      const sessionFiles = files.filter(f =>
+        f.endsWith(".jsonl") &&
+        !f.startsWith("agent-") &&
+        /^[0-9a-f-]+\.jsonl$/.test(f)
+      );
+
+      for (const file of sessionFiles) {
+        const sessionId = file.replace(".jsonl", "");
+        const filePath = join(projectPath, file);
+
+        // Skip old sessions
+        const fileStat = await stat(filePath).catch(() => null);
+        if (!fileStat || fileStat.mtimeMs < thirtyDaysAgo) continue;
+
+        // Parse session file
+        try {
+          const content = await readFile(filePath, "utf-8");
+          const lines = content.trim().split("\n").filter(Boolean);
+
+          let firstUserMessage = "";
+          let lastTimestamp = "";
+          let userCount = 0;
+          let assistantCount = 0;
+
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
+              if (entry.timestamp) lastTimestamp = entry.timestamp;
+
+              if (entry.type === "user") {
+                userCount++;
+                if (!firstUserMessage && entry.message?.content) {
+                  const msgContent = entry.message.content;
+                  if (typeof msgContent === "string") {
+                    firstUserMessage = msgContent.slice(0, 100);
+                  } else if (Array.isArray(msgContent)) {
+                    const textBlock = msgContent.find((c: any) => c.type === "text");
+                    if (textBlock?.text) firstUserMessage = textBlock.text.slice(0, 100);
+                  }
+                }
+              } else if (entry.type === "assistant") {
+                assistantCount++;
+              }
+            } catch {}
+          }
+
+          if (userCount === 0 && assistantCount === 0) continue;
+
+          sessions.push({
+            id: sessionId,
+            repo_path: repoPath,
+            repo_name: repoName,
+            preview: firstUserMessage || "No preview",
+            message_count: userCount + assistantCount,
+            last_activity_at: lastTimestamp || new Date().toISOString(),
+          });
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // Sort by last activity, limit to 100 most recent
+  sessions.sort((a, b) =>
+    new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime()
+  );
+  return sessions.slice(0, 100);
+}
+
+async function syncSessionsToSupabase(): Promise<void> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseKey) return;
+
+  try {
+    const sessions = await scanLocalSessions();
+    const restBase = `${supabaseUrl}/rest/v1/local_sessions`;
+    const headers = {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    };
+
+    // Clear existing and insert new
+    await fetch(`${restBase}?id=neq.`, { method: "DELETE", headers });
+
+    if (sessions.length > 0) {
+      const res = await fetch(restBase, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(sessions),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("[session-scanner] Sync failed:", text);
+      } else {
+        console.log(`[session-scanner] Synced ${sessions.length} local sessions to Supabase`);
+      }
+    }
+  } catch (err) {
+    console.error("[session-scanner] Error:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Bridge — connects Supabase Realtime to local Claude Code execution
 // ---------------------------------------------------------------------------
 
@@ -174,6 +356,19 @@ async function initBridge(
       },
     }
   );
+
+  // --- Sync local IDE sessions to Supabase on startup ---
+  // This allows the Vercel API to read sessions without filesystem access
+  syncSessionsToSupabase().then(() => {
+    console.log("[bridge] Initial session sync complete");
+  });
+
+  // Periodically resync sessions every 5 minutes
+  setInterval(() => {
+    syncSessionsToSupabase().catch(err => {
+      console.error("[bridge] Periodic session sync failed:", err);
+    });
+  }, 5 * 60 * 1000);
 
   // --- Push notification helper ---
   // Sends a push notification via the Next.js API route.
@@ -338,6 +533,39 @@ async function initBridge(
       debouncedRefresh();
     })
     .subscribe();
+
+  // --- Remote restart listener ---
+  // When the phone UI requests a restart, it sets restart_requested_at in bridge_status.
+  // The bridge sees this via Realtime and exits gracefully. The wrapper script (bridge.sh)
+  // will restart it automatically.
+  bridgeSupabase
+    .channel("bridge-restart")
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "bridge_status",
+    }, async (payload: any) => {
+      const requestedAt = payload.new?.restart_requested_at;
+      if (!requestedAt) return;
+      // Only act on recent requests (within last 30 seconds)
+      const age = Date.now() - new Date(requestedAt).getTime();
+      if (age > 30_000) return;
+      console.log("[bridge] Restart requested remotely — shutting down for restart...");
+      // Clear the flag so we don't restart-loop
+      await bridgeSupabase
+        .from("bridge_status")
+        .update({ restart_requested_at: null })
+        .eq("id", "default");
+      // Exit with code 0 — wrapper script will restart us
+      shutdown("REMOTE_RESTART");
+    })
+    .subscribe();
+
+  // Clear any stale restart request on startup
+  await bridgeSupabase
+    .from("bridge_status")
+    .update({ restart_requested_at: null })
+    .eq("id", "default");
 
   // --- Reset stale "running" and "queued" instances (scoped to local repos) ---
   if (localInstanceIds.size > 0) {

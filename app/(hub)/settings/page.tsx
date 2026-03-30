@@ -12,8 +12,11 @@ interface BridgeStatus {
   lastSeen: string | null;
 }
 
+type RestartState = "idle" | "requesting" | "requested" | "error";
+
 export default function SettingsPage() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ online: false, lastSeen: null });
+  const [restartState, setRestartState] = useState<RestartState>("idle");
 
   const fetchBridgeStatus = useCallback(async () => {
     try {
@@ -39,6 +42,54 @@ export default function SettingsPage() {
     }, 30_000);
     return () => clearInterval(interval);
   }, [fetchBridgeStatus]);
+
+  const handleRestart = async () => {
+    setRestartState("requesting");
+    try {
+      const res = await fetch("/api/bridge/restart", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setRestartState("requested");
+        // Poll for bridge to come back online
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          await fetchBridgeStatus();
+          if (attempts > 30) {
+            clearInterval(poll);
+            setRestartState("error");
+          }
+        }, 2000);
+        // Watch for bridge to go offline then come back
+        const waitForRestart = setInterval(async () => {
+          const r = await fetch("/api/bridge/status", { credentials: "include" }).catch(() => null);
+          if (r?.ok) {
+            const data = await r.json();
+            if (data.online) {
+              clearInterval(poll);
+              clearInterval(waitForRestart);
+              setRestartState("idle");
+              setBridgeStatus({ online: true, lastSeen: data.lastHeartbeat });
+            }
+          }
+        }, 3000);
+        // Timeout after 60s
+        setTimeout(() => {
+          clearInterval(poll);
+          clearInterval(waitForRestart);
+          if (restartState === "requested") setRestartState("idle");
+        }, 60_000);
+      } else {
+        setRestartState("error");
+        setTimeout(() => setRestartState("idle"), 3000);
+      }
+    } catch {
+      setRestartState("error");
+      setTimeout(() => setRestartState("idle"), 3000);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -68,6 +119,37 @@ export default function SettingsPage() {
                 Bridge must be running locally for messages to be processed.
               </p>
             )}
+            <div className="mt-3 pt-3 border-t border-hub-border">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-hub-text">Restart Bridge</p>
+                  <p className="text-xs text-hub-text-muted mt-0.5">
+                    Remotely restart the bridge process
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRestart}
+                  disabled={restartState !== "idle"}
+                  className="px-4 py-2 text-sm font-medium bg-hub-accent/10 hover:bg-hub-accent/20 text-hub-accent rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {restartState === "idle" && "Restart"}
+                  {restartState === "requesting" && "Sending..."}
+                  {restartState === "requested" && "Restarting..."}
+                  {restartState === "error" && "Failed"}
+                </button>
+              </div>
+              {restartState === "requested" && (
+                <p className="text-xs text-hub-warning mt-2">
+                  Bridge is restarting. This may take a few seconds...
+                </p>
+              )}
+              {restartState === "error" && (
+                <p className="text-xs text-hub-error mt-2">
+                  Failed to restart bridge. Is the wrapper script (bridge.sh) running?
+                </p>
+              )}
+            </div>
           </div>
         </section>
 

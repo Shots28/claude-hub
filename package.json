@@ -6,6 +6,7 @@
   "author": "Samuel Hootini",
   "scripts": {
     "dev": "node server.ts",
+    "bridge": "./bridge.sh",
     "build": "next build",
     "start": "NODE_ENV=production node server.ts",
     "lint": "next lint"

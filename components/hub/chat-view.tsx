@@ -9,12 +9,9 @@ import { ChatInput, type Attachment } from "./chat-input";
 import { PermissionBanner } from "./permission-banner";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { ErrorBanner } from "./error-banner";
-import { FileViewer } from "./file-viewer";
 import { PlanViewer } from "./plan-viewer";
-import { FileActivity } from "./file-activity";
 import { TaskPanel, useTaskCount } from "./task-panel";
 import { useBridgeStatus } from "@/lib/use-bridge-status";
-import { useFileActivity } from "@/lib/use-file-activity";
 import type {
   DbInstance,
   DbPendingPermission,
@@ -119,10 +116,8 @@ export function ChatView({
   const [updatingModel, setUpdatingModel] = useState(false);
   const bridgeStatus = useBridgeStatus();
 
-  // File viewer / plan viewer / file activity / tasks state
-  const [viewingFile, setViewingFile] = useState<string | null>(null);
+  // Plan viewer / tasks state
   const [viewingPlan, setViewingPlan] = useState<string | null>(null);
-  const [showFileActivity, setShowFileActivity] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
   const taskCount = useTaskCount();
 
@@ -166,9 +161,6 @@ export function ChatView({
       return () => clearTimeout(timer);
     }
   }, [loading, instanceMessages.length, instance.id, onLoadMessages]);
-
-  // Extract file activity from messages
-  const fileActivity = useFileActivity(instanceMessages);
 
   // Filter permissions for this instance
   const instancePermissions = useMemo(
@@ -381,31 +373,24 @@ export function ChatView({
               {updatingModel ? "..." : modelConfig.short}
             </button>
 
-            {/* File activity - if any */}
-            {fileActivity.length > 0 && (
+            {/* Tasks — visually distinct from setting pills */}
+            <div className="ml-auto relative">
               <button
                 type="button"
-                onClick={() => setShowFileActivity(true)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-hub-surface-2 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all"
+                onClick={() => setShowTasks(true)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-hub-surface-2 hover:bg-hub-border text-hub-text-muted hover:text-hub-text transition-all active:scale-95"
+                title="Tasks"
               >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                 </svg>
-                {fileActivity.length}
               </button>
-            )}
-
-            {/* Tasks */}
-            <button
-              type="button"
-              onClick={() => setShowTasks(true)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/30 transition-all"
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Tasks{taskCount > 0 && ` (${taskCount})`}
-            </button>
+              {taskCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-violet-500 text-white text-[10px] font-bold px-1">
+                  {taskCount}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -452,15 +437,6 @@ export function ChatView({
         modeBorderClass={modeConfig.borderColor}
       />
 
-      {/* File viewer modal */}
-      {viewingFile && (
-        <FileViewer
-          instanceId={instance.id}
-          filePath={viewingFile}
-          onClose={() => setViewingFile(null)}
-        />
-      )}
-
       {/* Plan viewer modal */}
       {viewingPlan && (
         <PlanViewer
@@ -468,18 +444,6 @@ export function ChatView({
           planPath={viewingPlan}
           instanceStatus={instance.status as InstanceStatus}
           onClose={() => setViewingPlan(null)}
-        />
-      )}
-
-      {/* File activity panel */}
-      {showFileActivity && (
-        <FileActivity
-          files={fileActivity}
-          onViewFile={(path) => {
-            setShowFileActivity(false);
-            setViewingFile(path);
-          }}
-          onClose={() => setShowFileActivity(false)}
         />
       )}
 

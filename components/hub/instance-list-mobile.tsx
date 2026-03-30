@@ -106,10 +106,9 @@ export function MobileActionMenu({
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (confirm("Delete this instance? This cannot be undone.")) {
-            onDelete(instanceId);
-          }
           onClose();
+          // Let parent handle confirmation
+          onDelete(instanceId);
         }}
         className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
       >

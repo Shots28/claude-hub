@@ -298,8 +298,8 @@ Page refresh:
 - No push notifications — uses polling + Supabase Realtime
 - No offline mode — requires active Supabase connection
 - Health metrics on Vercel show serverless stats, not bridge stats
-- No code diff viewer — assistant responses are plain text/markdown
 - Tool outputs (command results, file contents) are not directly displayed — Claude's SDK processes them internally and the results appear in Claude's subsequent text responses
+- Diff viewer is basic (shows old/new text blocks, not line-by-line diff)
 
 ---
 
@@ -434,6 +434,39 @@ Instances can get stuck in "running" or "queued" status:
 
 3. **Multiple bridges running** — Race condition causes neither to process correctly
    - Fix: Kill all bridge processes, start single instance
+
+### UI Component Gotchas (2024-03-29)
+
+1. **Multiple chat list components exist**
+   - `instance-list-mobile.tsx` — Used in the sidebar sheet
+   - `chats/page.tsx` — Has its **own inline ChatList** component for the /chats route
+   - **Lesson**: When fixing mobile chat list UI, check BOTH files - they are NOT shared
+
+2. **Double confirmation dialogs**
+   - Root cause: Both `MobileActionMenu` AND the parent's `handleDelete` had `confirm()` calls
+   - Fix: Remove `confirm()` from the menu component, let parent handle it
+   - **Lesson**: Confirmation dialogs should be in ONE place (preferably the handler, not the menu)
+
+3. **Diff view for Edit operations**
+   - Added simple mobile-friendly diff view in `activity-item.tsx`
+   - Shows removed code (red) and added code (green) when expanding Edit activities
+   - Falls back to JSON for non-Edit tools
+   - Uses `whitespace-pre-wrap` and `break-all` for mobile readability
+
+4. **Touch device hover states**
+   - `opacity-0 group-hover:opacity-100` is invisible on touch devices (no hover state)
+   - Always use visible default: `opacity-50 hover:opacity-100` or add explicit tap target
+   - Mobile buttons need `min-h-[52px]` or similar for adequate tap targets
+
+5. **Button inside Link prevents click handlers**
+   - Buttons inside `<Link>` components will navigate instead of firing onClick
+   - Solution: Restructure as siblings in a flex container
+   ```tsx
+   <div className="flex">
+     <Link className="flex-1">...</Link>
+     <button className="flex-shrink-0">Menu</button>
+   </div>
+   ```
 
 ### Debug Endpoints
 

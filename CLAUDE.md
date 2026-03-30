@@ -381,6 +381,27 @@ If polling runs before the API response replaces the optimistic message, it adds
 3. Repo paths normalized (trailing slashes stripped) in both create and import routes
 4. Error details returned from create API for easier debugging
 
+### Chats Disappear / "No Chats Yet" with Existing Instances
+
+**Symptoms**: User opens the /chats page and sees "No chats yet" even though instances exist in the database. All chats vanish from the UI.
+
+**Root cause**: `refreshInstances()` in `lib/use-realtime.ts` silently swallowed all fetch errors. If the auth cookie expired (or any API error occurred), the `/api/instances` call returned 401, `res.ok` was false, and the `setInstances` call was skipped — leaving the UI with an empty `[]` array and no error feedback.
+
+**Why cookie expiry doesn't redirect**: The Edge middleware (`middleware.ts`) only checks cookie *existence*, not validity. An expired JWT still passes middleware (cookie exists) but fails `getSessionFromCookies()` verification in the API route → 401.
+
+**Diagnostic steps**:
+1. Check browser console for `[realtime] refreshInstances` errors
+2. Hit `/api/instances` directly — if 401, cookie is expired
+3. Verify instances exist: query `instances` table in Supabase
+4. Check Vercel deployment status: `npx vercel ls` — ensure latest is "Ready"
+
+**Fix**: `refreshInstances()` now handles errors explicitly:
+- 401 → redirects to `/login` (forces re-authentication)
+- Other HTTP errors → sets `connectionError` state, shown in UI with Retry button
+- Network errors → sets `connectionError` with message
+
+**Prevention**: Any new API-fetching callback in `use-realtime.ts` must handle non-ok responses explicitly. Never silently swallow errors for data that drives the main UI.
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)

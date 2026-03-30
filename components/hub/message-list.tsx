@@ -125,8 +125,10 @@ export function MessageList({
       try {
         const input = JSON.parse(msg.content || "{}");
         const filePath = input.file_path || "";
-        if (/\.claude\/plans\/.*\.md$/.test(filePath)) {
-          recentPlanPath = filePath;
+        // Extract just the relative path from .claude/plans onwards
+        const planMatch = filePath.match(/(\.claude\/plans\/.*\.md)$/);
+        if (planMatch) {
+          recentPlanPath = planMatch[1]; // Use relative path, not absolute
         }
       } catch {}
     }

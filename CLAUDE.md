@@ -468,6 +468,12 @@ Instances can get stuck in "running" or "queued" status:
    </div>
    ```
 
+6. **File viewer expects relative paths**
+   - Bridge's `handleFileRequest` resolves paths relative to `repo_path`
+   - Absolute paths like `/Users/foo/repo/.claude/plans/my-plan.md` fail
+   - Must extract relative portion: `.claude/plans/my-plan.md`
+   - Use regex capture: `filePath.match(/(\.claude\/plans\/.*\.md)$/)`
+
 ### Debug Endpoints
 
 - `GET /api/health/db` — Database connection status, message counts, insert/select test

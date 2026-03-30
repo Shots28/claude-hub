@@ -70,9 +70,10 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
   if (toolName === "Write") {
     const filePath = input.file_path as string || "";
     const fileName = filePath.split("/").pop() || "file";
-    const isPlan = /\.claude\/plans\/[^/]+\.md$/.test(filePath);
+    // Extract relative path from .claude/plans onwards
+    const planMatch = filePath.match(/(\.claude\/plans\/.*\.md)$/);
 
-    if (isPlan) {
+    if (planMatch) {
       return {
         type: "plan_create",
         title: "Created plan",
@@ -84,7 +85,7 @@ function parseActivity(message: UiMessage): ParsedActivity | null {
         ),
         color: "text-purple-400",
         bgColor: "bg-purple-500/10",
-        details: { path: filePath },
+        details: { path: planMatch[1] }, // Use relative path for viewing
       };
     }
 

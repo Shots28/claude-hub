@@ -479,17 +479,17 @@ export function InstanceListMobile({
                             e.stopPropagation();
                             setMenuOpenId(menuOpenId === inst.id ? null : inst.id);
                           }}
-                          className={`flex-shrink-0 w-10 h-full flex items-center justify-center rounded-r-xl transition-all ${
+                          className={`flex-shrink-0 w-12 min-h-[52px] flex items-center justify-center rounded-r-xl border-l border-hub-border/30 transition-all ${
                             isActive
-                              ? "bg-hub-accent/10 hover:bg-hub-accent/20"
-                              : "hover:bg-hub-surface-2 active:bg-hub-surface-2"
+                              ? "bg-hub-accent/15"
+                              : "bg-hub-surface-2/50 active:bg-hub-surface-2"
                           }`}
                           aria-label="Instance options"
                         >
-                          <svg className="w-4 h-4 text-hub-text-muted" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="12" cy="5" r="2" />
-                            <circle cx="12" cy="12" r="2" />
-                            <circle cx="12" cy="19" r="2" />
+                          <svg className="w-5 h-5 text-hub-text-muted/80" fill="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="5" r="2.5" />
+                            <circle cx="12" cy="12" r="2.5" />
+                            <circle cx="12" cy="19" r="2.5" />
                           </svg>
                         </button>
                       </div>

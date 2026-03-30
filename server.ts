@@ -705,15 +705,40 @@ async function initBridge(
 
       console.log(`[session-sync] ${newMessages.length} new messages for ${inst.id.slice(0, 8)}... (${lastSyncedCount} → ${jsonlMessages.length})`);
 
-      const toInsert = newMessages.map(m => ({
-        instance_id: inst.id,
-        role: m.role,
-        content: m.content,
-        status: "done",
-        created_at: m.created_at,
-        tool_name: null,
-        tool_id: null,
-      }));
+      // Safety net: check DB for existing messages with same content to prevent duplicates.
+      // This catches edge cases where the count-based deduplication fails (e.g., race conditions).
+      const { data: existingMsgs } = await bridgeSupabase
+        .from("chat_messages")
+        .select("content, role")
+        .eq("instance_id", inst.id);
+
+      const existingSet = new Set(
+        (existingMsgs || []).map((m: any) => `${m.role}:${m.content}`)
+      );
+
+      const toInsert = newMessages
+        .filter(m => {
+          const key = `${m.role}:${m.content}`;
+          if (existingSet.has(key)) {
+            console.log(`[session-sync] Skipping duplicate: ${m.role} "${m.content.slice(0, 30)}..."`);
+            return false;
+          }
+          return true;
+        })
+        .map(m => ({
+          instance_id: inst.id,
+          role: m.role,
+          content: m.content,
+          status: "done",
+          created_at: m.created_at,
+          tool_name: null,
+          tool_id: null,
+        }));
+
+      if (toInsert.length === 0) {
+        console.log(`[session-sync] All messages already exist in DB, skipping insert`);
+        continue;
+      }
 
       // Acquire instance lock BEFORE inserting to prevent the Realtime handler
       // from racing: the INSERT triggers a Realtime event, but the handler checks
@@ -980,10 +1005,9 @@ async function initBridge(
             console.error("[bridge] Failed to update error status:", dbErr);
           }
         } finally {
-          instanceLocks.delete(instanceId);
-
-          // Update session sync count so it doesn't re-import the messages
-          // the SDK just wrote to the JSONL file
+          // Update session sync count BEFORE releasing lock to prevent race condition:
+          // If we release the lock first, session sync could run before the count is updated
+          // and re-insert messages that the bridge just wrote to the JSONL file.
           try {
             const inst = await manager.getInstance(instanceId);
             if (inst?.current_session_id) {
@@ -991,6 +1015,8 @@ async function initBridge(
               sessionMessageCounts.set(instanceId, jsonlCount);
             }
           } catch { /* best effort */ }
+
+          instanceLocks.delete(instanceId);
         }
 
         // After completion, re-check for newer unprocessed user messages

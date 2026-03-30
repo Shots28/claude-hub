@@ -291,6 +291,43 @@ Page refresh:
 
 **Fix**: Run `npm run bridge` on a machine with Claude CLI access.
 
+### Bridge Keeps Dying
+
+**Symptoms**: Bridge goes offline repeatedly. Instances alternate between working and stuck.
+
+**Root cause**: Claude instances running via the bridge can kill the bridge process itself — e.g., running `kill -9` or `pkill` targeting port 3100, or `lsof -ti:3100 | xargs kill`. This is **expected** when instances update `server.ts` and need to restart the server, but it takes down the bridge with no auto-restart.
+
+**Fix**: Restart the bridge manually. Consider using a process manager (e.g., `pm2`) for auto-restart.
+
+**Verify bridge is running**:
+```bash
+lsof -ti:3100    # Check process
+# Check heartbeat in bridge_status table (should be < 30s old)
+```
+
+### Instances Stuck on "Queued"
+
+**Symptoms**: Instance shows "queued" status but Claude never responds, even though the bridge is running.
+
+**Root cause**: When the bridge crashes mid-execution (e.g., an instance kills port 3100), the `finally` block that resets instance status to "idle" never runs. The instance stays "queued" forever.
+
+**Automatic fix**: Bridge startup now resets all stale "queued" instances to "idle" (`server.ts` startup cleanup). Restarting the bridge should clear stuck instances.
+
+**Manual fix**: Reset via Supabase SQL: `UPDATE instances SET status = 'idle' WHERE status = 'queued';`
+
+### Double Message Bubbles
+
+**Symptoms**: User message appears twice in the chat — once immediately, then a duplicate when waiting for the bridge response.
+
+**Root cause**: Race condition between three message insertion paths in `lib/use-realtime.ts`:
+1. **Optimistic UI** — message added instantly with `optimistic-*` ID
+2. **API response** — replaces optimistic with real DB message
+3. **Polling** (1s interval) — fetches all messages from API and merges
+
+If polling runs before the API response replaces the optimistic message, it adds the real DB message as a new entry (different ID from `optimistic-*`), resulting in two copies.
+
+**Fix**: The polling merge logic now checks for optimistic messages with matching content before adding a new entry (commit 2b69e94).
+
 ## Known Limitations
 
 - Single-user only (no multi-user/multi-tenant support)

@@ -46,17 +46,16 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-      // Try to find an existing Claude Hub tab
+      // Try to focus an existing Claude Hub window and navigate it
       for (const client of clientList) {
         if (client.url.includes(self.location.origin)) {
-          client.focus();
-          // Post message so the client-side listener can navigate
+          // Navigate first, then focus (more reliable on iOS)
           client.postMessage({ type: "navigate", url: targetUrl });
-          return;
+          return client.focus().catch(() => {});
         }
       }
-      // No existing tab — open a new one
-      return self.clients.openWindow(targetUrl);
+      // No existing window — open one with the full URL
+      return self.clients.openWindow(self.location.origin + targetUrl);
     })
   );
 });

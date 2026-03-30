@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
+import { requestPushPermission, isPushDenied } from "@/lib/push-client";
 
 interface BridgeStatus {
   online: boolean;
@@ -17,6 +18,24 @@ type RestartState = "idle" | "requesting" | "requested" | "error";
 export default function SettingsPage() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ online: false, lastSeen: null });
   const [restartState, setRestartState] = useState<RestartState>("idle");
+  const [pushState, setPushState] = useState<"unknown" | "granted" | "denied" | "unsupported" | "subscribing">("unknown");
+
+  // Check notification permission on mount
+  useEffect(() => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+      setPushState("unsupported");
+    } else if (Notification.permission === "granted") {
+      setPushState("granted");
+    } else if (Notification.permission === "denied" || isPushDenied()) {
+      setPushState("denied");
+    }
+  }, []);
+
+  const handleEnablePush = async () => {
+    setPushState("subscribing");
+    const success = await requestPushPermission();
+    setPushState(success ? "granted" : "denied");
+  };
 
   const fetchBridgeStatus = useCallback(async () => {
     try {
@@ -148,6 +167,51 @@ export default function SettingsPage() {
                 <p className="text-xs text-hub-error mt-2">
                   Failed to restart bridge. Is the wrapper script (bridge.sh) running?
                 </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Notifications */}
+        <section className="mb-6">
+          <h2 className="text-xs font-medium text-hub-text-muted uppercase tracking-wider mb-3">
+            Notifications
+          </h2>
+          <div className="bg-hub-surface border border-hub-border rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-hub-text">Push Notifications</p>
+                <p className="text-xs text-hub-text-muted mt-0.5">
+                  {pushState === "granted"
+                    ? "You'll be notified when Claude needs your attention"
+                    : pushState === "denied"
+                    ? "Notifications blocked — enable in browser settings"
+                    : pushState === "unsupported"
+                    ? "Not supported in this browser"
+                    : "Get notified for permissions, completions, and errors"}
+                </p>
+              </div>
+              {pushState === "granted" ? (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  Enabled
+                </span>
+              ) : pushState === "denied" ? (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-hub-text-muted">
+                  <span className="w-2 h-2 rounded-full bg-hub-text-muted" />
+                  Blocked
+                </span>
+              ) : pushState === "unsupported" ? (
+                <span className="text-sm text-hub-text-muted">N/A</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleEnablePush}
+                  disabled={pushState === "subscribing"}
+                  className="px-4 py-2 text-sm font-medium bg-hub-accent/10 hover:bg-hub-accent/20 text-hub-accent rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-hub-accent/50 disabled:opacity-50"
+                >
+                  {pushState === "subscribing" ? "Enabling..." : "Enable"}
+                </button>
               )}
             </div>
           </div>

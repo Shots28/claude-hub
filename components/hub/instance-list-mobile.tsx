@@ -45,12 +45,16 @@ export function MobileActionMenu({
   instanceId,
   onDelete,
   onRename,
+  onPin,
+  isPinned,
   onClose,
   triggerElement,
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
   onRename: (id: string) => void;
+  onPin?: (id: string, pinned: boolean) => void;
+  isPinned?: boolean;
   onClose: () => void;
   triggerElement: HTMLButtonElement | null;
 }) {
@@ -89,6 +93,20 @@ export function MobileActionMenu({
       style={menuStyle}
       className="w-32 bg-hub-surface-2 border border-hub-border rounded-lg shadow-lg py-1"
     >
+      {onPin && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onPin(instanceId, !isPinned);
+            onClose();
+          }}
+          className="w-full text-left px-3 py-2 text-sm text-hub-text hover:bg-hub-surface transition-colors"
+        >
+          {isPinned ? "Unpin" : "Pin to top"}
+        </button>
+      )}
       <button
         type="button"
         onClick={(e) => {
@@ -273,6 +291,19 @@ export function InstanceListMobile({
     setRenamingId(null);
   };
 
+  const handlePin = async (id: string, pinned: boolean) => {
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_pinned: pinned }),
+      });
+      if (res.ok) onRefresh();
+    } catch {
+      // silently fail
+    }
+  };
+
   // Get instances in the correct order
   const orderedInstances = useMemo(() => {
     const instanceMap = new Map(instances.map(i => [i.id, i]));
@@ -441,12 +472,17 @@ export function InstanceListMobile({
                               />
                             ) : (
                               <div
-                                className={`text-sm font-medium truncate ${
+                                className={`text-sm font-medium truncate flex items-center gap-1 ${
                                   isActive
                                     ? "text-hub-text"
                                     : "text-hub-text-muted"
                                 }`}
                               >
+                                {inst.is_pinned && (
+                                  <svg className="w-3 h-3 text-hub-accent flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                                  </svg>
+                                )}
                                 {inst.name}
                               </div>
                             )}
@@ -498,6 +534,8 @@ export function InstanceListMobile({
                           instanceId={inst.id}
                           onDelete={handleDelete}
                           onRename={handleRename}
+                          onPin={handlePin}
+                          isPinned={inst.is_pinned}
                           onClose={() => setMenuOpenId(null)}
                           triggerElement={menuTriggerRefs.current.get(inst.id) ?? null}
                         />

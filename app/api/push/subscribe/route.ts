@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
   }
 
   // Upsert by endpoint (UNIQUE constraint)
-  const { error } = await supabase
-    .from("push_subscriptions" as any)
+  const { error } = await (supabase as any)
+    .from("push_subscriptions")
     .upsert(
       {
         endpoint,

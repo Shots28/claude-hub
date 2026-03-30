@@ -185,6 +185,7 @@ export type DbInstance = {
   last_activity_at: string | null;
   model: string | null;
   max_thinking_tokens: number;
+  is_pinned: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -280,6 +281,15 @@ export type DbFileRequest = {
   completed_at: string | null;
 };
 
+export type DbPushSubscription = {
+  id: string;
+  endpoint: string;
+  keys_p256dh: string;
+  keys_auth: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // ---- Supabase generated-style database interface ----
 // Matches the GenericSchema shape required by @supabase/supabase-js v2.100+:
 // Tables must include Row, Insert, Update, and Relationships.
@@ -296,7 +306,7 @@ export interface Database {
       };
       instances: {
         Row: DbInstance;
-        Insert: Omit<DbInstance, "id" | "created_at" | "updated_at" | "sort_order" | "error_message" | "model" | "max_thinking_tokens"> & {
+        Insert: Omit<DbInstance, "id" | "created_at" | "updated_at" | "sort_order" | "error_message" | "model" | "max_thinking_tokens" | "is_pinned"> & {
           id?: string;
           created_at?: string;
           updated_at?: string;
@@ -304,6 +314,7 @@ export interface Database {
           error_message?: string | null;
           model?: string | null;
           max_thinking_tokens?: number;
+          is_pinned?: boolean;
         };
         Update: Partial<Omit<DbInstance, "id">>;
         Relationships: [
@@ -439,6 +450,16 @@ export interface Database {
             referencedColumns: ["id"];
           },
         ];
+      };
+      push_subscriptions: {
+        Row: DbPushSubscription;
+        Insert: Omit<DbPushSubscription, "id" | "created_at" | "updated_at"> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Omit<DbPushSubscription, "id">>;
+        Relationships: [];
       };
     };
     Views: {};

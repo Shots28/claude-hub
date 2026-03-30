@@ -16,6 +16,7 @@ import {
   useHubRealtime,
 } from "@/lib/hub-context";
 import { useNeedsAttention } from "@/lib/use-needs-attention";
+import { ConnectionStatus } from "@/components/hub/connection-status";
 
 function HubLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -56,6 +57,7 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <ConnectionStatus />
         {children}
       </main>
 

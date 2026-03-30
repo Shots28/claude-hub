@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabase
       .from("instances")
       .select("*")
+      .order("is_pinned", { ascending: false })
       .order("sort_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
 

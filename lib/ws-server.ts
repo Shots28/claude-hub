@@ -23,7 +23,7 @@ export class HubWebSocketServer {
     this.setupInstanceManagerEvents();
   }
 
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
     if (url.pathname !== "/ws") {
       socket.destroy();
@@ -40,8 +40,14 @@ export class HubWebSocketServer {
       return;
     }
 
-    const user = verifyJwt(token);
-    if (!user) {
+    try {
+      const user = await verifyJwt(token);
+      if (!user) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+    } catch {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;

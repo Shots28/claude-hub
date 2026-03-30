@@ -77,11 +77,23 @@ export function useNeedsAttention(
       // Check if instance just completed (was running, now idle)
       const prevStatus = prevStatusRef.current[inst.id];
       if (prevStatus === "running" && inst.status === "idle") {
-        // Check if we've already seen this completion
-        const seenTimestamp = inst.updated_at;
+        // Live transition detected
         const seen = getSeenCompletions(inst.id);
-        if (!seen.has(seenTimestamp)) {
+        if (!seen.has(inst.updated_at)) {
           completedInstancesRef.current.add(inst.id);
+        }
+      }
+
+      // Also detect missed completions (app opened after Claude finished)
+      // If idle, updated recently (within 30 min), and not yet seen
+      if (inst.status === "idle" && inst.updated_at && !prevStatus) {
+        const updatedAt = new Date(inst.updated_at).getTime();
+        const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
+        if (updatedAt > thirtyMinAgo) {
+          const seen = getSeenCompletions(inst.id);
+          if (!seen.has(inst.updated_at)) {
+            completedInstancesRef.current.add(inst.id);
+          }
         }
       }
 

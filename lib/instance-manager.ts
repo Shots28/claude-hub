@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import type {
   InstanceStatus,
-  ServerMessage,
   InstanceState,
   ToolInput,
   DbInstance,

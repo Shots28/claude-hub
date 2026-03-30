@@ -75,7 +75,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
   try {
     const body = await req.json();
-    const { name, permissionMode, allowedTools, sortOrder, current_session_id, model, max_thinking_tokens } = body as {
+    const { name, permissionMode, allowedTools, sortOrder, current_session_id, model, max_thinking_tokens, is_pinned } = body as {
       name?: string;
       permissionMode?: PermissionMode;
       allowedTools?: string[];
@@ -83,6 +83,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       current_session_id?: string | null;
       model?: string;
       max_thinking_tokens?: number;
+      is_pinned?: boolean;
     };
 
     // Build update payload — only include provided fields
@@ -91,6 +92,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (permissionMode !== undefined) updates.permission_mode = permissionMode;
     if (allowedTools !== undefined) updates.allowed_tools = allowedTools;
     if (sortOrder !== undefined) updates.sort_order = sortOrder;
+    if (is_pinned !== undefined) updates.is_pinned = is_pinned;
     if ("current_session_id" in body) updates.current_session_id = current_session_id ?? null;
     if (model !== undefined) {
       // Validate model value

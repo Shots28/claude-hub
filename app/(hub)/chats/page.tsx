@@ -19,6 +19,16 @@ import { useHubRealtime } from "@/lib/hub-context";
 import { useNeedsAttention } from "@/lib/use-needs-attention";
 import type { DbInstance, InstanceStatus } from "@/lib/types";
 
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const min = Math.floor(ms / 60_000);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
 function ChatsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -45,7 +55,7 @@ function ChatsPageContent() {
   }, [searchParams, realtime.instances, selectedId]);
 
   // Track instances needing attention
-  const { totalAttention, hasAttention } = useNeedsAttention(
+  const { totalAttention, hasAttention, needsAttention } = useNeedsAttention(
     realtime.instances,
     realtime.pendingPermissions,
     selectedId || undefined
@@ -61,7 +71,7 @@ function ChatsPageContent() {
     );
   }, [realtime.instances, search]);
 
-  // Group by repo path for organization
+  // Group by repo path for organization, sort attention items first within groups
   const groupedInstances = useMemo(() => {
     const groups = new Map<string, DbInstance[]>();
     for (const inst of filteredInstances) {
@@ -69,8 +79,16 @@ function ChatsPageContent() {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(inst);
     }
+    // Sort within each group: attention items first
+    for (const [key, insts] of groups) {
+      groups.set(key, insts.sort((a, b) => {
+        const aAtt = hasAttention(a.id) ? 0 : 1;
+        const bAtt = hasAttention(b.id) ? 0 : 1;
+        return aAtt - bAtt;
+      }));
+    }
     return groups;
-  }, [filteredInstances]);
+  }, [filteredInstances, hasAttention]);
 
   const selectedInstance = realtime.instances.find((i) => i.id === selectedId);
 
@@ -127,6 +145,20 @@ function ChatsPageContent() {
       console.error("Failed to delete:", err);
     }
   }, [handleRefresh, selectedId]);
+
+  // Handle pin/unpin
+  const handlePin = useCallback(async (id: string, pinned: boolean) => {
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_pinned: pinned }),
+      });
+      if (res.ok) handleRefresh();
+    } catch (err) {
+      console.error("Failed to pin:", err);
+    }
+  }, [handleRefresh]);
 
   // Chat list component - shared between mobile and desktop
   const ChatList = ({ isMobile = false }: { isMobile?: boolean }) => (
@@ -199,19 +231,35 @@ function ChatsPageContent() {
                               className="text-base font-medium w-full bg-hub-bg border border-hub-accent/50 rounded px-2 py-1 text-hub-text focus:outline-none focus:ring-1 focus:ring-hub-accent/50"
                             />
                           ) : (
-                            <div className="text-base font-medium text-hub-text truncate">
+                            <div className="text-base font-medium text-hub-text truncate flex items-center gap-1">
+                              {inst.is_pinned && (
+                                <svg className="w-3.5 h-3.5 text-hub-accent flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                                </svg>
+                              )}
                               {inst.name}
                             </div>
                           )}
-                          {inst.last_message_preview && (
-                            <p className="text-sm text-hub-text-muted/60 truncate mt-0.5">
-                              {inst.last_message_preview}
-                            </p>
-                          )}
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {inst.last_message_preview && (
+                              <p className="text-sm text-hub-text-muted/60 truncate flex-1">
+                                {inst.last_message_preview}
+                              </p>
+                            )}
+                            {inst.updated_at && (
+                              <span className="text-xs text-hub-text-muted/40 flex-shrink-0">
+                                {timeAgo(inst.updated_at)}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         {needsAtt && (
-                          <span className="min-w-[20px] h-5 flex items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white px-1.5 flex-shrink-0">
-                            !
+                          <span className={`h-5 flex items-center justify-center rounded-full text-[10px] font-medium text-white px-2 flex-shrink-0 ${
+                            needsAttention[inst.id] === "permission"
+                              ? "bg-orange-500"
+                              : "bg-emerald-500"
+                          }`}>
+                            {needsAttention[inst.id] === "permission" ? "Approval" : "Done"}
                           </span>
                         )}
                       </Link>
@@ -242,6 +290,8 @@ function ChatsPageContent() {
                         instanceId={inst.id}
                         onDelete={handleDelete}
                         onRename={(id) => handleRename(id, inst.name)}
+                        onPin={handlePin}
+                        isPinned={inst.is_pinned}
                         onClose={() => setMenuOpenId(null)}
                         triggerElement={menuTriggerRefs.current.get(inst.id) ?? null}
                       />
@@ -271,8 +321,10 @@ function ChatsPageContent() {
                       {inst.name}
                     </span>
                     {needsAtt && (
-                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white px-1">
-                        !
+                      <span className={`h-[18px] flex items-center justify-center rounded-full text-[9px] font-medium text-white px-1.5 ${
+                        needsAttention[inst.id] === "permission" ? "bg-orange-500" : "bg-emerald-500"
+                      }`}>
+                        {needsAttention[inst.id] === "permission" ? "Approval" : "Done"}
                       </span>
                     )}
                   </div>

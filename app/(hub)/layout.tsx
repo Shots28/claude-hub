@@ -28,16 +28,12 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
     ? pathname.split("/")[2]
     : undefined;
 
-  // Track instances needing attention (permission requests only)
-  const { totalAttention, markAllSeen } = useNeedsAttention(
+  // Track instances needing attention (permissions + completions)
+  const { totalAttention } = useNeedsAttention(
     realtime.instances,
     realtime.pendingPermissions,
     activeInstanceId
   );
-
-  // Badge clears when user TAPS the Chats button (onClick below),
-  // NOT on mount/return to the app. This prevents badges from clearing
-  // when the user leaves the PWA and comes back.
 
   // Determine active bottom nav tab
   const activeTab = pathname?.startsWith("/settings")
@@ -71,7 +67,6 @@ function HubLayoutInner({ children }: { children: React.ReactNode }) {
           {/* Chats */}
           <Link
             href="/chats"
-            onClick={markAllSeen}
             className={`relative flex flex-col items-center justify-center min-w-[64px] h-14 px-3 rounded-2xl transition-all active:scale-95 ${
               pathname?.startsWith("/chats")
                 ? "bg-hub-accent text-white"

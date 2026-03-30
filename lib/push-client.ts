@@ -30,9 +30,10 @@ export function markPushDenied(): void {
 
 /**
  * Subscribe the current service worker push subscription to the server.
- * Sends the PushSubscription details to /api/push/subscribe for storage.
+ * If forceNew is true, unsubscribes the old subscription first (needed
+ * when VAPID keys change or the subscription expires).
  */
-export async function subscribeToPush(): Promise<boolean> {
+export async function subscribeToPush(forceNew = false): Promise<boolean> {
   try {
     const registration = await navigator.serviceWorker.ready;
     const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
@@ -46,6 +47,13 @@ export async function subscribeToPush(): Promise<boolean> {
     const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey).buffer as ArrayBuffer;
 
     let subscription = await registration.pushManager.getSubscription();
+
+    // If forcing a new subscription, unsubscribe the old one first
+    if (subscription && forceNew) {
+      console.log("[push] Unsubscribing old subscription for re-subscribe");
+      await subscription.unsubscribe();
+      subscription = null;
+    }
 
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
@@ -100,6 +108,32 @@ export async function requestPushPermission(): Promise<boolean> {
 
   if (result === "denied") {
     markPushDenied();
+  }
+
+  return false;
+}
+
+/**
+ * Re-subscribe to push notifications. Clears the "denied" flag,
+ * unsubscribes the old push subscription, and creates a fresh one.
+ * Use when VAPID keys change or the subscription expires.
+ */
+export async function resubscribePush(): Promise<boolean> {
+  // Clear the denied flag so we can try again
+  try {
+    localStorage.removeItem(PUSH_DENIED_KEY);
+  } catch { /* ignore */ }
+
+  if (!("Notification" in window)) return false;
+
+  if (Notification.permission === "granted") {
+    return subscribeToPush(true); // force new subscription
+  }
+
+  // Permission not granted — request it fresh
+  const result = await Notification.requestPermission();
+  if (result === "granted") {
+    return subscribeToPush(true);
   }
 
   return false;

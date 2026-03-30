@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
-import { requestPushPermission, isPushDenied } from "@/lib/push-client";
+import { requestPushPermission, resubscribePush, isPushDenied } from "@/lib/push-client";
 
 interface BridgeStatus {
   online: boolean;
@@ -34,6 +34,12 @@ export default function SettingsPage() {
   const handleEnablePush = async () => {
     setPushState("subscribing");
     const success = await requestPushPermission();
+    setPushState(success ? "granted" : "denied");
+  };
+
+  const handleResubscribe = async () => {
+    setPushState("subscribing");
+    const success = await resubscribePush();
     setPushState(success ? "granted" : "denied");
   };
 
@@ -199,17 +205,26 @@ export default function SettingsPage() {
                   </span>
                   <button
                     type="button"
-                    onClick={handleEnablePush}
+                    onClick={handleResubscribe}
                     className="px-3 py-1.5 text-xs font-medium bg-hub-surface-2 hover:bg-hub-border text-hub-text-muted rounded-lg transition-colors"
                   >
                     Re-subscribe
                   </button>
                 </div>
               ) : pushState === "denied" ? (
-                <span className="flex items-center gap-1.5 text-sm font-medium text-hub-text-muted">
-                  <span className="w-2 h-2 rounded-full bg-hub-text-muted" />
-                  Blocked
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5 text-sm font-medium text-hub-text-muted">
+                    <span className="w-2 h-2 rounded-full bg-hub-text-muted" />
+                    Blocked
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResubscribe}
+                    className="px-3 py-1.5 text-xs font-medium bg-hub-surface-2 hover:bg-hub-border text-hub-text-muted rounded-lg transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
               ) : pushState === "unsupported" ? (
                 <span className="text-sm text-hub-text-muted">N/A</span>
               ) : (

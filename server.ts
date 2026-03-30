@@ -715,44 +715,80 @@ async function initBridge(
         tool_id: null,
       }));
 
-      const BATCH = 500;
-      for (let i = 0; i < toInsert.length; i += BATCH) {
-        const batch = toInsert.slice(i, i + BATCH);
-        const { data: inserted, error } = await bridgeSupabase
-          .from("chat_messages")
-          .insert(batch)
-          .select("id, role");
-        if (error) {
-          console.error(`[session-sync] Insert error:`, error);
-        } else if (inserted) {
-          // Mark inserted user messages as already-processed so the bridge's
-          // Realtime handler doesn't try to execute them as new user queries
-          for (const msg of inserted) {
-            if (msg.role === "user") {
-              processedMessageIds.add(msg.id);
+      // Acquire instance lock BEFORE inserting to prevent the Realtime handler
+      // from racing: the INSERT triggers a Realtime event, but the handler checks
+      // instanceLocks first. Without this lock, the Realtime event could arrive
+      // before processedMessageIds is updated, causing double-processing.
+      instanceLocks.add(inst.id);
+      try {
+        const BATCH = 500;
+        for (let i = 0; i < toInsert.length; i += BATCH) {
+          const batch = toInsert.slice(i, i + BATCH);
+          const { data: inserted, error } = await bridgeSupabase
+            .from("chat_messages")
+            .insert(batch)
+            .select("id, role");
+          if (error) {
+            console.error(`[session-sync] Insert error:`, error);
+          } else if (inserted) {
+            // Mark inserted user messages as already-processed so the bridge's
+            // Realtime handler doesn't try to execute them as new user queries
+            for (const msg of inserted) {
+              if (msg.role === "user") {
+                processedMessageIds.add(msg.id);
+              }
             }
           }
         }
+      } finally {
+        instanceLocks.delete(inst.id);
       }
     }
   }
 
-  // Initialize message counts from DB so we don't re-sync on startup
+  // Count text messages in a JSONL session file (user + assistant only)
+  async function countJsonlMessages(repoPath: string, sessionId: string): Promise<number> {
+    const sessionPath = join(homedir(), ".claude", "projects",
+      repoPath.replace(/\//g, "-"), `${sessionId}.jsonl`);
+    try {
+      const content = await readFile(sessionPath, "utf-8");
+      const lines = content.trim().split("\n").filter(Boolean);
+      let count = 0;
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type !== "user" && entry.type !== "assistant") continue;
+          const mc = entry.message?.content;
+          let hasText = false;
+          if (typeof mc === "string") hasText = !!mc;
+          else if (Array.isArray(mc)) hasText = mc.some((c: any) => c.type === "text" && c.text);
+          if (hasText) count++;
+        } catch { /* skip */ }
+      }
+      return count;
+    } catch {
+      return 0;
+    }
+  }
+
+  // Initialize message counts from JSONL files so we don't re-sync on startup.
+  // Previously used DB row count, but that includes tool messages and diverges
+  // from the JSONL text message count, causing false re-imports.
   async function initSessionSyncCounts() {
     if (localInstanceIds.size === 0) return;
     const { data: instances } = await bridgeSupabase
       .from("instances")
-      .select("id, current_session_id")
+      .select("id, repo_path, current_session_id")
       .in("id", Array.from(localInstanceIds))
       .not("current_session_id", "is", null);
     if (!instances?.length) return;
 
     for (const inst of instances) {
-      const { count } = await bridgeSupabase
-        .from("chat_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("instance_id", inst.id);
-      if (count) sessionMessageCounts.set(inst.id, count);
+      const count = await countJsonlMessages(inst.repo_path, inst.current_session_id);
+      if (count > 0) {
+        sessionMessageCounts.set(inst.id, count);
+        console.log(`[session-sync] Init count for ${inst.id.slice(0, 8)}...: ${count} JSONL messages`);
+      }
     }
   }
 
@@ -945,6 +981,16 @@ async function initBridge(
           }
         } finally {
           instanceLocks.delete(instanceId);
+
+          // Update session sync count so it doesn't re-import the messages
+          // the SDK just wrote to the JSONL file
+          try {
+            const inst = await manager.getInstance(instanceId);
+            if (inst?.current_session_id) {
+              const jsonlCount = await countJsonlMessages(inst.repo_path, inst.current_session_id);
+              sessionMessageCounts.set(instanceId, jsonlCount);
+            }
+          } catch { /* best effort */ }
         }
 
         // After completion, re-check for newer unprocessed user messages
@@ -963,9 +1009,19 @@ async function initBridge(
             } else {
               if (latest[0].id) processedMessageIds.add(latest[0].id);
               console.log(`[bridge] Re-processing pending message ${latest[0].id} for instance ${instanceId}`);
-              manager.sendMessage(instanceId, latest[0].content).catch((err: any) => {
-                console.error(`[bridge] Re-process failed for ${instanceId}:`, err);
-              });
+              manager.sendMessage(instanceId, latest[0].content)
+                .then(async () => {
+                  try {
+                    const inst = await manager.getInstance(instanceId);
+                    if (inst?.current_session_id) {
+                      const jsonlCount = await countJsonlMessages(inst.repo_path, inst.current_session_id);
+                      sessionMessageCounts.set(instanceId, jsonlCount);
+                    }
+                  } catch { /* best effort */ }
+                })
+                .catch((err: any) => {
+                  console.error(`[bridge] Re-process failed for ${instanceId}:`, err);
+                });
             }
           }
         } catch (err) {
@@ -1041,9 +1097,20 @@ async function initBridge(
           }
           if (latest[0].id) processedMessageIds.add(latest[0].id);
           console.log(`[bridge-poll] Processing queued instance ${inst.id} (msg: ${latest[0].id})`);
-          manager.sendMessage(inst.id, latest[0].content).catch((err: any) => {
-            console.error(`[bridge-poll] Failed for ${inst.id}:`, err);
-          });
+          manager.sendMessage(inst.id, latest[0].content)
+            .then(async () => {
+              // Update session sync count to prevent re-import of JSONL entries
+              try {
+                const instData = await manager.getInstance(inst.id);
+                if (instData?.current_session_id) {
+                  const jsonlCount = await countJsonlMessages(instData.repo_path, instData.current_session_id);
+                  sessionMessageCounts.set(inst.id, jsonlCount);
+                }
+              } catch { /* best effort */ }
+            })
+            .catch((err: any) => {
+              console.error(`[bridge-poll] Failed for ${inst.id}:`, err);
+            });
         }
       }
     } catch (err) {

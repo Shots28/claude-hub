@@ -215,8 +215,8 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | — | — | VAPID public key for Web Push (browser-side) |
 | `VAPID_PUBLIC_KEY` | — | — | VAPID public key (server-side, same value) |
 | `VAPID_PRIVATE_KEY` | — | — | VAPID private key (server-side only) |
-| `VAPID_SUBJECT` | — | — | VAPID subject (mailto: or URL) |
-| `APP_URL` | — | — | App URL for bridge→API push calls (e.g. https://claude-hub.vercel.app) |
+| `VAPID_SUBJECT` | — | — | VAPID subject — must be a real URL or email, NOT localhost (Apple rejects it). Use the Vercel deploy URL. |
+| `APP_URL` | — | — | **Must be `http://localhost:3100`** (bridge calls itself for push — `web-push` crashes on Vercel serverless) |
 | `PUSH_API_SECRET` | — | — | Bearer token for bridge→push API auth |
 
 ## Important Implementation Details
@@ -236,7 +236,7 @@ All tables defined in the `Database` interface in `lib/types.ts`. RLS disabled (
 - **Permission mode mapping** (`lib/instance-manager.ts`): DB value `"auto"` maps to SDK `"bypassPermissions"`. Valid SDK modes: `bypassPermissions`, `acceptEdits`, `plan`, `default`.
 - **Intentional `as any` casts** (`lib/instance-manager.ts`, API routes): Used on `supabase.from()` calls as a workaround — the hand-written `Database` interface doesn't always satisfy Supabase's strict `GenericTable` constraints at compile time, but works correctly at runtime.
 - **Startup cleanup** (`server.ts`): On bridge start, resets stale "running" instances to "queued" and marks orphaned "streaming" messages as "error" with "[Bridge restarted]" content.
-- **Push notifications** (`lib/push-client.ts`, `lib/push-server.ts`): Web Push API for phone notifications. Bridge sends via `/api/push/send` (Bearer token auth). Subscriptions stored in `push_subscriptions` table. Notifies on: permission requests, instance completion, errors. Stale subscriptions (410 Gone) auto-deleted. Enable in Settings page.
+- **Push notifications** (`lib/push-client.ts`, `lib/push-server.ts`, `public/sw.js`): Web Push API for phone banner notifications with sound. Bridge sends via `http://localhost:3100/api/push/send` (Bearer token auth, NOT Vercel — `web-push` module crashes on serverless). Subscriptions stored in `push_subscriptions` table. Stale subscriptions (410 Gone) auto-deleted. Enable/re-subscribe in Settings page. VAPID public key is **hardcoded** in `push-client.ts` (not `process.env.NEXT_PUBLIC_*`) because Next.js turbopack fails to inline env vars in library files at build time. Notification content is descriptive: completions show a preview of Claude's last response (120 chars), permissions show the tool name and context (e.g., "Run command: npm test" or "Edit: auth.ts"), errors show the actual error message. Tapping a notification opens the corresponding chat via the service worker's `notificationclick` handler.
 - **Instance pinning** (`instances.is_pinned` column): Pinned instances sort to top in all list views. Toggle via 3-dots menu. Pin icon (blue) shown next to pinned instance names.
 - **Attention tracking** (`lib/use-needs-attention.ts`): Tracks pending permission requests AND completed instances (running → idle). All badges are red `!` bubbles (in chat list rows and count on nav). Dismissed **per-instance only** when the user opens that specific chat — viewing the chat list does NOT clear anything. Per-instance dismiss timestamps stored in localStorage (`hub_dismissed_instances`). A completion is dismissed if `dismissedAt >= instance.updated_at`. Entries auto-prune after 2 hours. Missed completions (app opened after Claude finished, within 30 min) also detected. Attention items sorted to top in chat list. **Do not change the dismiss behavior** — it was iterated on specifically: no global dismiss, no dismiss-on-list-view, no dismiss-on-app-return.
 - **Message idempotency** (`app/api/instances/[id]/messages/route.ts`): POST endpoint checks for duplicate user messages with identical content within a 30-second window before inserting. Returns the existing message if found, preventing duplicates from phone retry logic when the server response doesn't reach the client (timeout/network).
@@ -466,7 +466,6 @@ If polling runs before the API response replaces the optimistic message, it adds
 
 - Single-user only (no multi-user/multi-tenant support)
 - Bridge must be running locally for messages to be processed
-- No push notifications — uses polling + Supabase Realtime
 - No offline mode — requires active Supabase connection
 - Health metrics on Vercel show serverless stats, not bridge stats
 - Tool outputs (command results, file contents) are not directly displayed — Claude's SDK processes them internally and the results appear in Claude's subsequent text responses
@@ -612,6 +611,56 @@ Instances can get stuck in "running" or "queued" status:
 
 3. **Multiple bridges running** — Race condition causes neither to process correctly
    - Fix: Kill all bridge processes, start single instance
+
+### Push Notifications (2026-03-30)
+
+1. **VAPID subject must be a real URL or email**
+   - Apple's push service rejects JWTs signed with `mailto:anything@localhost` (returns `403 BadJwtToken`)
+   - Use the actual deployed URL: `VAPID_SUBJECT=https://claude-hub-psi.vercel.app`
+   - This is not documented in most web-push tutorials; they show `mailto:` examples but don't warn about localhost
+
+2. **`NEXT_PUBLIC_*` env vars fail in library files with turbopack**
+   - `process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY` in `lib/push-client.ts` was NOT replaced at build time by Next.js turbopack
+   - The browser received `undefined`, which caused `atob()` to throw "the string contains invalid characters"
+   - **Fix**: Hardcode the VAPID public key directly in the source — it's a public key, safe to commit
+   - The `getVapidPublicKey()` function checks the env var first (for local dev flexibility) and falls back to the hardcoded value
+
+3. **`web-push` npm module crashes on Vercel serverless**
+   - The `/api/push/send` endpoint returns 500 on Vercel (Node crypto incompatibility)
+   - **Fix**: Set `APP_URL=http://localhost:3100` so the bridge calls itself instead of Vercel
+   - Push notifications are sent from the bridge server, not from Vercel
+
+4. **iOS push permission is sticky once denied**
+   - If `Notification.permission` returns `"denied"`, the only fix is deleting the PWA from the home screen and re-adding it
+   - The `localStorage` flag `pushDenied` (set by `markPushDenied()`) compounds this — `resubscribePush()` clears it, but browser-level denial persists
+   - Settings page shows a debug line (`perm: granted/denied, denied: true/false, vapid: ...`) to diagnose
+
+5. **Old push subscriptions fail silently after VAPID key changes**
+   - If VAPID keys are regenerated, existing subscriptions in `push_subscriptions` table become invalid (Apple returns 403)
+   - Users must tap "Re-subscribe" in Settings to create a fresh subscription
+   - `resubscribePush()` unsubscribes the old PushManager subscription before creating a new one
+
+6. **`echo` adds trailing newlines to Vercel env vars**
+   - `echo "$VAR" | vercel env add` appends `\n` to the value
+   - Use `printf '%s' "$VAR" | vercel env add` or `vercel env add --value "$VAR"` instead
+   - This caused VAPID key mismatch between what the browser subscribed with and what the server signed with
+
+7. **Service worker caching on iOS**
+   - iOS caches service workers aggressively — changes to `sw.js` may take multiple reloads to activate
+   - `self.skipWaiting()` + `self.clients.claim()` in the SW helps, but isn't instant
+   - Hard refresh (swipe away PWA, reopen) is the most reliable way to pick up SW changes
+
+### Attention System (2026-03-30)
+
+1. **Per-instance dismiss only** — The attention system went through several iterations:
+   - Global `markAllSeen` on list view → badges disappeared before user saw which chat needed them
+   - Global `markAllSeen` on Chats button tap → PWA app-return re-mounted layout, calling the effect again and clearing badges
+   - **Final**: Per-instance dismiss stored in localStorage (`hub_dismissed_instances`), cleared only when opening that specific chat via `currentInstanceId`
+   - **Do not change this** — each iteration was in response to specific UX frustration
+
+2. **All badges must be red** — Green "Done" and amber "Approval" badges were confusing and not obviously "needs attention". Unified to red `!` bubbles matching the nav badge style.
+
+3. **Completions + permissions both trigger badges** — Initially only tracked permissions (actionable), then added completions back because the user wants to know when Claude finishes even though it's not strictly actionable.
 
 ### UI Component Gotchas (2024-03-29)
 

@@ -50,7 +50,7 @@ export function MobileActionMenu({
 }: {
   instanceId: string;
   onDelete: (id: string) => void;
-  onRename: (id: string | void) => void;
+  onRename: (id: string) => void;
   onClose: () => void;
   triggerElement: HTMLButtonElement | null;
 }) {

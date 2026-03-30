@@ -239,7 +239,7 @@ function ChatsPageContent() {
                       <MobileActionMenu
                         instanceId={inst.id}
                         onDelete={handleDelete}
-                        onRename={() => handleRename(inst.id, inst.name)}
+                        onRename={(id) => handleRename(id, inst.name)}
                         onClose={() => setMenuOpenId(null)}
                         triggerElement={menuTriggerRefs.current.get(inst.id) ?? null}
                       />

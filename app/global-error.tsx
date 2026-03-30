@@ -1,18 +1,27 @@
 "use client";
 
-// Minimal error boundary - avoid hooks to prevent SSR issues
-export default function GlobalError(props: {
-  error: Error;
+// Minimal global error boundary
+// Note: global-error must include its own <html> and <body> tags
+export default function GlobalError({
+  reset,
+}: {
+  error: Error & { digest?: string };
   reset: () => void;
 }) {
-  // Use inline handler to avoid closure issues
-  const handleReset = () => props.reset();
-
   return (
-    <html>
-      <body>
+    <html lang="en">
+      <body style={{ fontFamily: 'system-ui', padding: '2rem', textAlign: 'center' }}>
         <h2>Something went wrong</h2>
-        <button onClick={handleReset}>Try again</button>
+        <button
+          onClick={() => reset()}
+          style={{
+            padding: '0.5rem 1rem',
+            marginTop: '1rem',
+            cursor: 'pointer'
+          }}
+        >
+          Try again
+        </button>
       </body>
     </html>
   );

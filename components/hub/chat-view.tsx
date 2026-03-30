@@ -336,6 +336,10 @@ export function ChatView({
             {bridgeStatus.health === "offline" && (
               <span className="text-[10px] text-yellow-500">Offline</span>
             )}
+            {/* Debug: Message count indicator */}
+            <span className="text-[10px] text-hub-text-muted ml-auto">
+              {loading ? "Loading..." : `${instanceMessages.length} msgs`}
+            </span>
           </div>
 
           {/* Bottom row: Tappable pills for Mode, Effort, Files */}

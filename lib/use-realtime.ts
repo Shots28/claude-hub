@@ -50,6 +50,7 @@ export function useRealtime(): RealtimeState {
   const activeInstanceRef = useRef<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const sendRetryCountRef = useRef(0);
+  const sendInFlightRef = useRef<string | null>(null); // instance ID of in-flight send
 
   const clearError = useCallback(() => {
     setConnectionError(null);
@@ -420,6 +421,13 @@ export function useRealtime(): RealtimeState {
 
   const sendMessage = useCallback(
     async (instanceId: string, text: string, attachments?: MessageAttachment[]) => {
+      // Prevent concurrent sends for the same instance (double-tap on mobile)
+      if (sendInFlightRef.current === instanceId) {
+        console.warn("[realtime] sendMessage skipped — already sending for instance:", instanceId);
+        return;
+      }
+      sendInFlightRef.current = instanceId;
+
       // Build display content - include image indicators for UI
       let displayContent = text;
       if (attachments && attachments.length > 0) {
@@ -533,47 +541,51 @@ export function useRealtime(): RealtimeState {
         }
       };
 
-      // First attempt
-      const firstResult = await doSend();
-      if (firstResult !== "retriable") {
-        if (firstResult === "not_retriable") {
-          // Mark as failed immediately — no retry
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === optimisticId
-                ? { ...m, deliveryStatus: "failed" as const }
-                : m,
-            ),
-          );
-          setConnectionError("Failed to send message — tap to retry");
-        }
-        return;
-      }
-
-      // Only retry on clearly retriable errors (server 500s, pre-connect network failures)
-      while (attempt < MAX_RETRIES) {
-        attempt++;
-        const delay = Math.min(BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000, 16_000);
-        console.log(`[realtime] Retry attempt ${attempt}/${MAX_RETRIES} in ${Math.round(delay)}ms`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-
-        const result = await doSend();
-        if (result !== "retriable") {
-          if (result === "ok") sendRetryCountRef.current = 0;
+      try {
+        // First attempt
+        const firstResult = await doSend();
+        if (firstResult !== "retriable") {
+          if (firstResult === "not_retriable") {
+            // Mark as failed immediately — no retry
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === optimisticId
+                  ? { ...m, deliveryStatus: "failed" as const }
+                  : m,
+              ),
+            );
+            setConnectionError("Failed to send message — tap to retry");
+          }
           return;
         }
-      }
 
-      // All retries exhausted — mark as failed
-      sendRetryCountRef.current = attempt;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === optimisticId
-            ? { ...m, deliveryStatus: "failed" as const }
-            : m,
-        ),
-      );
-      setConnectionError("Failed to send message — tap to retry");
+        // Only retry on clearly retriable errors (server 500s, pre-connect network failures)
+        while (attempt < MAX_RETRIES) {
+          attempt++;
+          const delay = Math.min(BASE_DELAY * Math.pow(2, attempt) + Math.random() * 1000, 16_000);
+          console.log(`[realtime] Retry attempt ${attempt}/${MAX_RETRIES} in ${Math.round(delay)}ms`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+
+          const result = await doSend();
+          if (result !== "retriable") {
+            if (result === "ok") sendRetryCountRef.current = 0;
+            return;
+          }
+        }
+
+        // All retries exhausted — mark as failed
+        sendRetryCountRef.current = attempt;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === optimisticId
+              ? { ...m, deliveryStatus: "failed" as const }
+              : m,
+          ),
+        );
+        setConnectionError("Failed to send message — tap to retry");
+      } finally {
+        sendInFlightRef.current = null;
+      }
     },
     [startPolling],
   );

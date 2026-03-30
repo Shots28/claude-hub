@@ -66,6 +66,7 @@ export function ChatInput({
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -89,7 +90,7 @@ export function ChatInput({
   const isBusy = isRunning || isQueued;
   const hasText = text.trim().length > 0;
   const hasAttachments = attachments.length > 0;
-  const canSend = hasText || hasAttachments;
+  const canSend = (hasText || hasAttachments) && !isSending;
 
   // Auto-resize textarea
   const adjustHeight = useCallback(() => {
@@ -110,7 +111,9 @@ export function ChatInput({
   const handleSend = async () => {
     const trimmed = text.trim().replace(/\0/g, "");
     if ((!trimmed && attachments.length === 0) || trimmed.length > 50000) return;
+    if (isSending) return; // Prevent double-tap on mobile
 
+    setIsSending(true);
     const currentAttachments = [...attachments];
     setText("");
     setAttachments([]);
@@ -123,6 +126,8 @@ export function ChatInput({
       await onSend(trimmed, currentAttachments.length > 0 ? currentAttachments : undefined);
     } catch {
       // Error handling is in use-realtime.ts
+    } finally {
+      setIsSending(false);
     }
   };
 

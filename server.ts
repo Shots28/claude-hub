@@ -339,20 +339,36 @@ async function initBridge(
     })
     .subscribe();
 
-  // --- Reset stale "running" instances (scoped to local repos) ---
+  // --- Reset stale "running" and "queued" instances (scoped to local repos) ---
   if (localInstanceIds.size > 0) {
-    const { data: stale } = await bridgeSupabase
+    const { data: staleRunning } = await bridgeSupabase
       .from("instances")
       .select("id")
       .eq("status", "running")
       .in("id", Array.from(localInstanceIds));
 
-    if (stale?.length) {
+    if (staleRunning?.length) {
       await bridgeSupabase
         .from("instances")
         .update({ status: "queued", updated_at: new Date().toISOString() })
-        .in("id", stale.map((s: any) => s.id));
-      console.log(`[bridge] Reset ${stale.length} stale running instances to queued`);
+        .in("id", staleRunning.map((s: any) => s.id));
+      console.log(`[bridge] Reset ${staleRunning.length} stale running instances to queued`);
+    }
+
+    // Reset stale "queued" instances that were left by a crashed bridge.
+    // The poll loop will re-queue them if there's actually a pending user message.
+    const { data: staleQueued } = await bridgeSupabase
+      .from("instances")
+      .select("id")
+      .eq("status", "queued")
+      .in("id", Array.from(localInstanceIds));
+
+    if (staleQueued?.length) {
+      await bridgeSupabase
+        .from("instances")
+        .update({ status: "idle", updated_at: new Date().toISOString() })
+        .in("id", staleQueued.map((s: any) => s.id));
+      console.log(`[bridge] Reset ${staleQueued.length} stale queued instances to idle`);
     }
   }
 

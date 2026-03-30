@@ -162,6 +162,18 @@ export function useRealtime(): RealtimeState {
                   changed = true;
                 }
               } else if (!msg.id.startsWith("optimistic-")) {
+                // Before adding, check if there's an optimistic message with
+                // matching content that this real message should replace
+                if (msg.role === "user") {
+                  const optIdx = merged.findIndex(
+                    (m) => m.id.startsWith("optimistic-") && m.content === msg.content,
+                  );
+                  if (optIdx >= 0) {
+                    merged[optIdx] = { ...msg, deliveryStatus: "delivered" as const };
+                    changed = true;
+                    continue;
+                  }
+                }
                 merged.push(msg);
                 changed = true;
               }

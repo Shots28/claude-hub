@@ -376,6 +376,12 @@ If polling runs before the API response replaces the optimistic message, it adds
 
 3. **Bridge dedup hardening** (`server.ts`): `processedMessageIds` changed from `Set` (cleared entirely every 5 min, causing dedup gaps) to `Map<id, timestamp>` with per-entry eviction at 10 minutes. Poll now checks `instanceLocks` before processing (skips if Realtime handler is active).
 
+4. **API route status race fix** (`app/api/instances/[id]/messages/route.ts`): The INSERT triggered Realtime instantly, but the UPDATE to "queued" ran after slow auto-naming queries. The bridge could finish and set "idle" before the API's UPDATE, which then overwrote "idle" → "queued" — causing the poll to re-process. Fix: set "queued" BEFORE the INSERT; auto-naming is now fire-and-forget.
+
+5. **Re-check block removed** (`server.ts`): After `sendMessage()` completed, a re-check queried for unprocessed messages and called `sendMessage()` again without holding `instanceLocks`, racing with Realtime events. Removed entirely — the 30s poll fallback handles messages arriving during processing.
+
+6. **Stuck "queued" reset** (`server.ts` poll): If the latest message is already "assistant" but instance is "queued" (from the status race), poll now resets to "idle" instead of leaving it stuck.
+
 ### Duplicate Messages from Session Sync
 
 **Symptoms**: User sends one message from phone, it appears twice with two duplicate responses. Can cascade into a loop.

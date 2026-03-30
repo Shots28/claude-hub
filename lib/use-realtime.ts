@@ -62,9 +62,16 @@ export function useRealtime(): RealtimeState {
       if (res.ok) {
         const data = await res.json();
         setInstances(data.instances ?? []);
+      } else if (res.status === 401) {
+        console.error("[realtime] refreshInstances: 401 Unauthorized — redirecting to login");
+        window.location.href = "/login";
+      } else {
+        console.error("[realtime] refreshInstances failed:", res.status);
+        setConnectionError(`Failed to load chats (${res.status})`);
       }
-    } catch {
-      // silently fail — will retry on reconnect
+    } catch (err) {
+      console.error("[realtime] refreshInstances error:", err);
+      setConnectionError("Failed to load chats — network error");
     }
   }, []);
 

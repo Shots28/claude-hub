@@ -171,9 +171,20 @@ function ChatsPageContent() {
             </svg>
           </div>
           <p className="text-base text-hub-text-muted mb-2">
-            {search.trim() ? "No matching chats" : "No chats yet"}
+            {search.trim() ? "No matching chats" : realtime.connectionError ? "Failed to load chats" : "No chats yet"}
           </p>
-          {!search.trim() && (
+          {realtime.connectionError && (
+            <p className="text-sm text-hub-error mb-3">{realtime.connectionError}</p>
+          )}
+          {realtime.connectionError ? (
+            <button
+              type="button"
+              onClick={() => { realtime.clearError(); realtime.refreshInstances(); }}
+              className="text-base text-hub-accent hover:text-hub-accent-hover transition-colors"
+            >
+              Retry
+            </button>
+          ) : !search.trim() ? (
             <button
               type="button"
               onClick={() => setShowCreate(true)}
@@ -181,7 +192,7 @@ function ChatsPageContent() {
             >
               Create your first chat
             </button>
-          )}
+          ) : null}
         </div>
       ) : (
         Array.from(groupedInstances.entries()).map(([repoPath, instances]) => (

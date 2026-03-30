@@ -192,10 +192,19 @@ export default function SettingsPage() {
                 </p>
               </div>
               {pushState === "granted" ? (
-                <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  Enabled
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    Enabled
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleEnablePush}
+                    className="px-3 py-1.5 text-xs font-medium bg-hub-surface-2 hover:bg-hub-border text-hub-text-muted rounded-lg transition-colors"
+                  >
+                    Re-subscribe
+                  </button>
+                </div>
               ) : pushState === "denied" ? (
                 <span className="flex items-center gap-1.5 text-sm font-medium text-hub-text-muted">
                   <span className="w-2 h-2 rounded-full bg-hub-text-muted" />

@@ -14,6 +14,7 @@ import { ChatView } from "@/components/hub/chat-view";
 import { CreateInstanceModal } from "@/components/hub/create-instance-modal";
 import { StatusBadge } from "@/components/hub/status-badge";
 import { MobileActionMenu } from "@/components/hub/instance-list-mobile";
+import { GlobalSessionPicker } from "@/components/hub/global-session-picker";
 import { useHubRealtime } from "@/lib/hub-context";
 import { useNeedsAttention } from "@/lib/use-needs-attention";
 import type { DbInstance, InstanceStatus } from "@/lib/types";
@@ -23,6 +24,7 @@ function ChatsPageContent() {
   const searchParams = useSearchParams();
   const realtime = useHubRealtime();
   const [showCreate, setShowCreate] = useState(false);
+  const [showDesktopSessions, setShowDesktopSessions] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -296,16 +298,31 @@ function ChatsPageContent() {
         <div className="flex-shrink-0 border-b border-hub-border bg-hub-bg px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-xl font-semibold">Chats</h1>
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className="w-11 h-11 flex items-center justify-center rounded-xl bg-hub-accent text-white active:scale-95 transition-transform"
-              aria-label="New chat"
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Continue from Desktop */}
+              <button
+                type="button"
+                onClick={() => setShowDesktopSessions(true)}
+                className="h-11 px-3 flex items-center gap-2 rounded-xl bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 active:scale-95 transition-transform"
+                aria-label="Continue from desktop"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
+                </svg>
+                <span className="text-sm font-medium">Desktop</span>
+              </button>
+              {/* New chat */}
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className="w-11 h-11 flex items-center justify-center rounded-xl bg-hub-accent text-white active:scale-95 transition-transform"
+                aria-label="New chat"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Search */}
@@ -448,6 +465,13 @@ function ChatsPageContent() {
         }}
         existingNames={realtime.instances.map((i) => i.name)}
       />
+
+      {/* Desktop sessions picker */}
+      {showDesktopSessions && (
+        <GlobalSessionPicker
+          onClose={() => setShowDesktopSessions(false)}
+        />
+      )}
     </>
   );
 }

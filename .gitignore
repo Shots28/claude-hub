@@ -33,3 +33,6 @@ Thumbs.db
 .vercel
 supabase/.temp/
 config.bat
+
+# harden: ignore all env files (a bare .env was not covered by .env*.local)
+!.env.example

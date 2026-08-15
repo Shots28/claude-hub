@@ -36,3 +36,4 @@ config.bat
 
 # harden: ignore all env files (a bare .env was not covered by .env*.local)
 !.env.example
+.env
